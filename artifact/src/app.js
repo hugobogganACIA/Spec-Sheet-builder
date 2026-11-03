@@ -400,9 +400,19 @@ Answer with JSON only: {"summary": "one or two sentences", "ops": [{"op": "...",
       C.AIRCRAFT_TYPES.map(([k, l]) => h("option", { value: k }, l)),
       h("option", { value: "none" }, "No illustration"));
     sel.value = c.illustration || "auto";
+    const engDetected = C.engineKey({ ...ws.spec, cover: { ...c, engine_illustration: "auto" } });
+    const engLabel = (k) => (C.ENGINE_TYPES.find((t) => t[0] === k) || [k, k])[1];
+    const engId = fid("cv");
+    const engSel = h("select", { class: "input", id: engId, disabled: ro, onchange: (e) => { c.engine_illustration = e.target.value; markDirty(); } },
+      h("option", { value: "auto" }, engDetected ? `Automatic (${engLabel(engDetected)})` : "Automatic (engine not recognised)"),
+      C.ENGINE_TYPES.map(([k, l]) => h("option", { value: k }, l)),
+      h("option", { value: "none" }, "No illustration"));
+    engSel.value = c.engine_illustration || "auto";
     return h("div", { class: "panel pad" }, h("h2", { style: "margin-bottom:10px" }, "Cover page"),
       h("div", { class: "grid3" }, f("Aircraft model", "model"), f("Aircraft MSN", "msn"), f("Year of manufacture", "year")),
-      h("div", { class: "field", style: "margin-top:12px;max-width:340px" }, h("label", { for: selId }, "Aircraft illustration"), sel));
+      h("div", { class: "grid2", style: "margin-top:12px" },
+        h("div", { class: "field" }, h("label", { for: selId }, "Aircraft illustration (cover)"), sel),
+        h("div", { class: "field" }, h("label", { for: engId }, "Engine illustration (Engines page)"), engSel)));
   }
   const headingAbove = (i) => { for (let k = i; k >= 0; k--) if (ws.spec.sections[k].type === "heading") return ws.spec.sections[k].title; return ""; };
 
@@ -620,9 +630,9 @@ Answer with JSON only: {"summary": "one or two sentences", "ops": [{"op": "...",
     const images = {};
     for (const a of spec.attachments || []) if (!a.hidden && a.asset) { const d = await assetDataUrl(a.asset); if (d) images[a.asset] = d; }
     const font = await pdfFonts();
-    const key = C.aircraftKey(spec);
+    const key = C.aircraftKey(spec), eng = C.engineKey(spec);
     const dd = C.buildPdf(spec, settings, { logoWhite: A.logoWhite, logoColor: A.logoColor, images, fontName: font.name,
-                                            aircraft: key ? A.aircraft[key] : null });
+                                            aircraft: key ? A.aircraft[key] : null, engine: eng ? A.engines[eng] : null });
     return await new Promise((res, rej) => {
       try { window.pdfMake.createPdf(dd, null, font.fonts, font.vfs).getBuffer((buf) => res(new Uint8Array(buf))); } catch (e) { rej(e); }
     });

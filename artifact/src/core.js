@@ -486,12 +486,12 @@
       while (row.length < perRow) row.push({ width: "*", text: "" });
       at(36, 606 + (i / perRow) * 54, PAGE_W - 72, { columns: row, columnGap: 14 });
     }
-    at(36, 716, PAGE_W - 72, { text: settings.disclaimer || "", color: paleSky, fontSize: 4.9, lineHeight: 1.12, alignment: "justify" });
+    at(36, 690, PAGE_W - 72, { text: settings.disclaimer || "", color: paleSky, fontSize: 4.9, lineHeight: 1.12, alignment: "justify" });
     // Cover texts are absolutely placed; start the body on page 2.
     content.push({ text: "", pageBreak: "after" });
 
     // ---- body
-    let first = true;
+    let first = true, pendingEngine = false, engineShown = false;
     const h2 = (t, brk) => ({ stack: [
       { text: t, font: "Heading", fontSize: 12.5, color: NAVY },
       { canvas: [{ type: "line", x1: 0, y1: 2, x2: PAGE_W - 64, y2: 2, lineWidth: 1.2, lineColor: NAVY }] }],
@@ -503,12 +503,32 @@
       if (s.hidden) continue;
       const brk = s.page_break_before && !first;
       first = false;
-      if (s.type === "heading") { content.push(h2(s.title || "", brk)); continue; }
+      // The engine illustration goes beside the first fields block under the ENGINES heading.
+      const engineArt = () => {
+        const art = engineShown ? null : assets.engine;
+        if (!art || !art.src) return null;
+        engineShown = true;
+        const w = Math.min(150, 82 * art.ratio);
+        return { width: 150, stack: [{ image: art.src, width: w, alignment: "right" }] };
+      };
+      if (pendingEngine && s.type !== "kv") {
+        const art = engineArt();
+        if (art) content.push({ columns: [{ width: "*", text: "" }, art], margin: [0, 0, 0, 8] });
+        pendingEngine = false;
+      }
+      if (s.type === "heading") {
+        content.push(h2(s.title || "", brk));
+        pendingEngine = (s.title || "").toUpperCase() === "ENGINES";
+        continue;
+      }
       if (s.type === "kv") {
         const body = (s.rows || []).map((r) => [{ text: r.label, bold: true }, { text: r.value }]);
         if (!body.length) continue;
+        const table = { table: { widths: ["40%", "*"], body }, layout: { ...zebra, fillColor: (i) => (i % 2 === 0 ? STRIPE : null) } };
+        const art = pendingEngine ? engineArt() : null;
+        pendingEngine = false;
         content.push({ stack: [s.title ? h2(s.title.toUpperCase()) : null,
-          { table: { widths: ["40%", "*"], body }, layout: { ...zebra, fillColor: (i) => (i % 2 === 0 ? STRIPE : null) } }].filter(Boolean),
+          art ? { columns: [{ width: "*", stack: [table] }, art], columnGap: 18 } : table].filter(Boolean),
           margin: [0, 0, 0, 12], pageBreak: brk ? "before" : undefined, unbreakable: body.length < 25 });
         continue;
       }
@@ -619,11 +639,35 @@
       if (/DHC\s*-?\s*6|TWIN\s*OTTER/.test(t)) return "dhc6";
       if (/1900|BEECH|B190/.test(t)) return "b1900";
       if (/ERJ|EMB\s*-?\s*1[34][05]|\bE1[34]5/.test(t)) return "erj145";
+      if (/A\s*-?\s*320|\b320-[12]\d\d/.test(t)) return "a320";
       return null;
     };
     return match(c.model || "") || match(type); // the cover model wins over the sheet's type code
   }
-  const AIRCRAFT_TYPES = [["atr72", "ATR 72"], ["atr42", "ATR 42"], ["dhc6", "DHC-6 Twin Otter"], ["b1900", "Beechcraft 1900"], ["erj145", "Embraer ERJ 145"]];
+  const AIRCRAFT_TYPES = [["atr72", "ATR 72"], ["atr42", "ATR 42"], ["dhc6", "DHC-6 Twin Otter"], ["b1900", "Beechcraft 1900"], ["erj145", "Embraer ERJ 145"], ["a320", "Airbus A320"]];
 
-  root.SpecCore = { aircraftKey, AIRCRAFT_TYPES, importWorkbook, workbookImages, diff, applyOps, buildPdf, formatNumber, newId, setLayoutDefaults };
+  /** Which engine illustration fits: cover.engine_illustration overrides ("none" hides it), else the ENGINES model / type. */
+  function engineKey(spec) {
+    const c = (spec && spec.cover) || {};
+    if (c.engine_illustration && c.engine_illustration !== "auto") return c.engine_illustration === "none" ? null : c.engine_illustration;
+    const kv = [], grid = [];
+    let hd = "";
+    for (const s of (spec && spec.sections) || []) {
+      if (s.type === "heading") { hd = (s.title || "").toUpperCase(); continue; }
+      if (hd !== "ENGINES") continue;
+      if (s.type === "kv") for (const r of s.rows) kv.push(r.value || "");
+      if (s.type === "grid") for (const r of s.rows) if (/TYPE|MODEL/i.test(r.label || "")) grid.push(...r.cells);
+    }
+    const match = (t) => {
+      t = t.toUpperCase();
+      if (/PW\s*-?\s*127/.test(t)) return "pw127";
+      if (/PT\s*-?\s*6/.test(t)) return "pt6";
+      if (/V\s*-?\s*25\d\d/.test(t)) return "v2500";
+      return null;
+    };
+    return match(kv.join(" ")) || match(grid.join(" ")); // the ENGINES model field wins over the table
+  }
+  const ENGINE_TYPES = [["pw127", "Pratt & Whitney PW127"], ["pt6", "Pratt & Whitney PT6"], ["v2500", "IAE V2500"]];
+
+  root.SpecCore = { aircraftKey, AIRCRAFT_TYPES, engineKey, ENGINE_TYPES, importWorkbook, workbookImages, diff, applyOps, buildPdf, formatNumber, newId, setLayoutDefaults };
 })(typeof window !== "undefined" ? window : globalThis);

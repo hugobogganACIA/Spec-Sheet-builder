@@ -26,10 +26,12 @@ assets = {
 
 from PIL import Image  # noqa: E402
 
-for img in sorted((HERE / "img").glob("aircraft-*.png")):
-    with Image.open(img) as im:
-        ratio = im.width / im.height
-    assets["aircraft"][img.stem.split("-", 1)[1]] = {"src": data_uri(img, "image/png"), "ratio": round(ratio, 4)}
+assets["engines"] = {}
+for kind, bucket in (("aircraft", "aircraft"), ("engine", "engines")):
+    for img in sorted((HERE / "img").glob(f"{kind}-*.png")):
+        with Image.open(img) as im:
+            ratio = im.width / im.height
+        assets[bucket][img.stem.split("-", 1)[1]] = {"src": data_uri(img, "image/png"), "ratio": round(ratio, 4)}
 
 src = HERE / "src"
 page = "\n".join([
