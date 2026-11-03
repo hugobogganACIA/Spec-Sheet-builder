@@ -797,37 +797,6 @@ Answer with JSON only: {"summary": "one or two sentences", "ops": [{"op": "...",
   }
 
   // ------------------------------------------------------------ settings
-  function fontPanel(s, ro) {
-    const box = h("div", {});
-    const draw = () => {
-      const f = s.font || {};
-      box.replaceChildren(
-        h("p", { class: "small muted", style: "margin:4px 0 10px" },
-          "The brand font is Archivo, the typeface on the ACIA website. It is built in: body text in Archivo Regular, headings in Archivo SemiBold at a slightly wider width, and cover names in Archivo Bold at the widest width. ",
-          "Only upload files here to replace Archivo with a different typeface; leave all four empty to keep Archivo."),
-        h("div", { class: "grid2" }, FONT_SLOTS.map(([slot, label]) => h("div", { class: "field" }, h("label", {}, label),
-          h("div", { class: "row", style: "flex-wrap:nowrap" },
-            h("span", { class: f[slot] ? "chip ok" : "chip" }, f[slot] ? "Uploaded" : "Not set"),
-            h("span", { class: "grow small muted mono", style: "overflow:hidden;text-overflow:ellipsis;white-space:nowrap" }, (f.names && f.names[slot]) || ""),
-            ro || !canAssets ? null : h("button", { class: "btn", onclick: () => pickFile(".otf,.ttf,.woff,font/otf,font/ttf,font/woff", async (file) => {
-              const done = busy(`Checking ${file.name}…`);
-              try {
-                const buf = await file.arrayBuffer();
-                try { await new FontFace("probe", buf).load(); } catch (_) { throw new Error(`${file.name} isn't a font file this browser can read.`); }
-                const up = await cap.assets.upload(new Blob([buf], { type: file.type || "font/otf" }));
-                s.font = { family: "Gibson", ...(s.font || {}), [slot]: up.id, names: { ...((s.font && s.font.names) || {}), [slot]: file.name } };
-                done(); draw(); toast(`${label} added. Press Save settings to use it.`);
-              } catch (e) { done(); toast(e.message || "Couldn't upload that font.", true); }
-            }) }, f[slot] ? "Replace" : "Upload"),
-            ro || !f[slot] ? null : h("button", { class: "btn ghost", "aria-label": `Remove ${label}`, onclick: () => {
-              const next = { ...s.font }; delete next[slot]; next.names = { ...(next.names || {}) }; delete next.names[slot];
-              s.font = FONT_SLOTS.some(([k]) => next[k]) ? next : null; draw(); } }, "✕"))))),
-        !canAssets && !ro ? h("p", { class: "small muted" }, "Only editors of this artifact can upload font files.") : "");
-    };
-    draw();
-    return h("div", { class: "panel pad" }, h("h2", {}, "Brand font"), box);
-  }
-
   function renderSettings() {
     const s = clone(settings);
     const ro = !canWrite || !cap.db;
@@ -850,7 +819,6 @@ Answer with JSON only: {"summary": "one or two sentences", "ops": [{"op": "...",
               h("input", { class: "input", id, type: "number", min: "1", value: s.stale_days || 90, disabled: ro, oninput: (e) => (s.stale_days = Math.max(1, parseInt(e.target.value, 10) || 90)) })); })())),
         h("div", { class: "panel pad" }, h("h2", {}, "Cover contacts"), h("p", { class: "small muted" }, "The first contact sits on its own line; the rest go two per row."), box),
         h("div", { class: "panel pad" }, h("h2", { style: "margin-bottom:10px" }, "Cover disclaimer"), f("Disclaimer text", "disclaimer", true)),
-        fontPanel(s, ro),
         ro ? h("p", { class: "muted" }, "You can view these settings but not change them.") : h("div", {}, h("button", { class: "btn primary", onclick: async () => {
           try { await cap.db.doc("config/settings").set(s); toast("Settings saved. Every PDF uses them from now on."); } catch (e) { toast("Couldn't save settings: " + (e.message || e.code), true); }
         } }, "Save settings"))));
