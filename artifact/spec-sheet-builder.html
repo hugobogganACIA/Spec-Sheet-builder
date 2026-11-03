@@ -650,20 +650,32 @@ table.changes td.new { color: var(--ok); font-weight: 600; font-family: var(--mo
     const infoDate = kvFind("INFORMATION DATE");
     if (infoDate) at(PAGE_W - 236, 50, 200, { text: `Status as of ${infoDate}`, alignment: "right", color: paleSky, fontSize: 7.5 });
 
-    at(36, 112, 470, { text: "AIRCRAFT MODEL", color: paleSky, font: "Heading", fontSize: 8, characterSpacing: 1.6 });
+    const isEngine = cover.kind === "engine";
+    const idLabel = isEngine ? "ESN" : "MSN";
+    at(36, 112, 470, { text: isEngine ? "ENGINE MODEL" : "AIRCRAFT MODEL", color: paleSky, font: "Heading", fontSize: 8, characterSpacing: 1.6 });
     at(36, 126, 470, { text: cover.model || "", color: white, font: "Feature", fontSize: 38, lineHeight: 1 });
-    at(36, 178, 470, { text: [{ text: "MSN ", color: paleSky }, { text: cover.msn || "", color: white }], font: "Heading", fontSize: 18 });
+    at(36, 178, 470, { text: [{ text: idLabel + " ", color: paleSky }, { text: cover.msn || "", color: white }], font: "Heading", fontSize: 18 });
 
     // Illustration: sits on a ground line, centred, scaled to the type's proportions.
-    const art = assets.aircraft;
-    const groundY = 452;
+    // Aircraft sheets show the aircraft type; engine sheets show the engine type (larger, it is the subject).
+    const art = isEngine ? assets.engine : assets.aircraft;
+    const groundY = isEngine ? 458 : 452;
     if (art && art.src) {
-      const maxW = 476, maxH = 168;
+      const maxW = isEngine ? 340 : 476, maxH = isEngine ? 196 : 168;
       const w = Math.min(maxW, maxH * art.ratio), hgt = w / art.ratio;
       content.push({ image: art.src, width: w, absolutePosition: { x: (PAGE_W - w) / 2, y: groundY - hgt } });
     }
 
-    const facts = [
+    const kvLike = (re) => {
+      for (const s of spec.sections || []) if (s.type === "kv") for (const r of s.rows) if (re.test(r.label || "")) return r.value || "";
+      return "";
+    };
+    const facts = isEngine ? [
+      ["ESN", cover.msn],
+      ["YEAR BUILT", cover.year],
+      ["TSN", kvLike(/\bTSN\b|TIME SINCE NEW/i)],
+      ["CSN", kvLike(/\bCSN\b|CYCLES SINCE NEW/i)],
+    ] : [
       ["MSN", cover.msn],
       ["YEAR BUILT", cover.year],
       ["REGISTRATION", kvFind("AIRCRAFT REGISTRATION")],
@@ -693,7 +705,7 @@ table.changes td.new { color: var(--ok); font-weight: 600; font-family: var(--mo
     content.push({ text: "", pageBreak: "after" });
 
     // ---- body
-    let first = true, pendingEngine = false, engineShown = false;
+    let first = true;
     const h2 = (t, brk) => ({ stack: [
       { text: t, font: "Heading", fontSize: 12.5, color: NAVY },
       { canvas: [{ type: "line", x1: 0, y1: 2, x2: PAGE_W - 64, y2: 2, lineWidth: 1.2, lineColor: NAVY }] }],
@@ -705,32 +717,12 @@ table.changes td.new { color: var(--ok); font-weight: 600; font-family: var(--mo
       if (s.hidden) continue;
       const brk = s.page_break_before && !first;
       first = false;
-      // The engine illustration goes beside the first fields block under the ENGINES heading.
-      const engineArt = () => {
-        const art = engineShown ? null : assets.engine;
-        if (!art || !art.src) return null;
-        engineShown = true;
-        const w = Math.min(150, 82 * art.ratio);
-        return { width: 150, stack: [{ image: art.src, width: w, alignment: "right" }] };
-      };
-      if (pendingEngine && s.type !== "kv") {
-        const art = engineArt();
-        if (art) content.push({ columns: [{ width: "*", text: "" }, art], margin: [0, 0, 0, 8] });
-        pendingEngine = false;
-      }
-      if (s.type === "heading") {
-        content.push(h2(s.title || "", brk));
-        pendingEngine = (s.title || "").toUpperCase() === "ENGINES";
-        continue;
-      }
+      if (s.type === "heading") { content.push(h2(s.title || "", brk)); continue; }
       if (s.type === "kv") {
         const body = (s.rows || []).map((r) => [{ text: r.label, bold: true }, { text: r.value }]);
         if (!body.length) continue;
         const table = { table: { widths: ["40%", "*"], body }, layout: { ...zebra, fillColor: (i) => (i % 2 === 0 ? STRIPE : null) } };
-        const art = pendingEngine ? engineArt() : null;
-        pendingEngine = false;
-        content.push({ stack: [s.title ? h2(s.title.toUpperCase()) : null,
-          art ? { columns: [{ width: "*", stack: [table] }, art], columnGap: 18 } : table].filter(Boolean),
+        content.push({ stack: [s.title ? h2(s.title.toUpperCase()) : null, table].filter(Boolean),
           margin: [0, 0, 0, 12], pageBreak: brk ? "before" : undefined, unbreakable: body.length < 25 });
         continue;
       }
@@ -820,7 +812,7 @@ table.changes td.new { color: var(--ok); font-weight: 600; font-family: var(--mo
       footer: (page) => page === 1 ? null : {
         margin: [32, 28.5, 32, 0],
         columns: [
-          { width: "*", text: [{ text: settings.company || "", bold: true }, ` | MSN ${cover.msn || ""}`], color: "#FFFFFF", fontSize: 7.2 },
+          { width: "*", text: [{ text: settings.company || "", bold: true }, ` | ${cover.kind === "engine" ? "ESN" : "MSN"} ${cover.msn || ""}`], color: "#FFFFFF", fontSize: 7.2 },
           { width: 40, text: String(page), alignment: "right", color: NAVY, bold: true, fontSize: 7.2 }],
       },
       pageBreakBefore: (node, after) => node.headlineLevel === 1 && after.length === 0,
@@ -848,7 +840,7 @@ table.changes td.new { color: var(--ok); font-weight: 600; font-family: var(--mo
   }
   const AIRCRAFT_TYPES = [["atr72", "ATR 72"], ["atr42", "ATR 42"], ["dhc6", "DHC-6 Twin Otter"], ["b1900", "Beechcraft 1900"], ["erj145", "Embraer ERJ 145"], ["a320", "Airbus A320"]];
 
-  /** Which engine illustration fits: cover.engine_illustration overrides ("none" hides it), else the ENGINES model / type. */
+  /** Engine illustration for an engine spec sheet's cover: cover.engine_illustration overrides ("none" hides it), else detected from the model. */
   function engineKey(spec) {
     const c = (spec && spec.cover) || {};
     if (c.engine_illustration && c.engine_illustration !== "auto") return c.engine_illustration === "none" ? null : c.engine_illustration;
@@ -867,11 +859,27 @@ table.changes td.new { color: var(--ok); font-weight: 600; font-family: var(--mo
       if (/V\s*-?\s*25\d\d/.test(t)) return "v2500";
       return null;
     };
-    return match(kv.join(" ")) || match(grid.join(" ")); // the ENGINES model field wins over the table
+    return match(c.model || "") || match(kv.join(" ")) || match(grid.join(" ")); // cover model, then ENGINES fields, then tables
   }
   const ENGINE_TYPES = [["pw127", "Pratt & Whitney PW127"], ["pt6", "Pratt & Whitney PT6"], ["v2500", "IAE V2500"]];
 
-  root.SpecCore = { aircraftKey, AIRCRAFT_TYPES, engineKey, ENGINE_TYPES, importWorkbook, workbookImages, diff, applyOps, buildPdf, formatNumber, newId, setLayoutDefaults };
+  /** A blank engine spec sheet to fill in. */
+  function newEngineSpec(model, esn, year) {
+    const kv = (title, labels) => ({ id: newId(), type: "kv", title, rows: labels.map((l) => ({ label: l, value: "" })), page_break_before: false, hidden: false });
+    const general = kv("General Description", ["INFORMATION DATE", "ENGINE MANUFACTURER", "ENGINE MODEL", "ENGINE SERIAL NUMBER", "DATE OF MANUFACTURE",
+      "TIME SINCE NEW (TSN)", "CYCLES SINCE NEW (CSN)", "TIME SINCE LAST SHOP VISIT", "CYCLES SINCE LAST SHOP VISIT", "LAST SHOP VISIT DATE", "LAST SHOP VISIT MRO", "LOCATION"]);
+    const set = (l, v) => { const r = general.rows.find((x) => x.label === l); if (r) r.value = v; };
+    set("ENGINE MODEL", model); set("ENGINE SERIAL NUMBER", esn);
+    return {
+      cover: { kind: "engine", model, msn: esn, year: year || "", illustration: "auto", engine_illustration: "auto" },
+      sections: [general,
+        { id: newId(), type: "grid", title: "LIFE LIMITED PARTS", label_header: "", groups: [], columns: ["Part No.", "Serial No.", "Limit", "CSN", "Remaining"],
+          rows: [{ label: "", cells: ["", "", "", "", ""] }], page_break_before: true, hidden: false }],
+      attachments: [], source: { filename: "", info_date: "" },
+    };
+  }
+
+  root.SpecCore = { newEngineSpec, aircraftKey, AIRCRAFT_TYPES, engineKey, ENGINE_TYPES, importWorkbook, workbookImages, diff, applyOps, buildPdf, formatNumber, newId, setLayoutDefaults };
 })(typeof window !== "undefined" ? window : globalThis);
 
 </script>
@@ -1034,7 +1042,7 @@ table.changes td.new { color: var(--ok); font-weight: 600; font-family: var(--mo
     else if (fleetError && !fleet.length) list = h("div", { class: "panel empty" }, fleetError);
     else if (!fleet.length) list = h("div", { class: "panel empty" }, h("h2", {}, "No spec sheets yet"), h("p", {}, "Upload the Excel tech spec for an aircraft to create its first spec sheet."));
     else list = h("div", { class: "fleet" }, fleet.map((a) => h("button", { class: "tail", onclick: () => (location.hash = "#ac-" + a.id) },
-      h("div", { class: "top" }, h("span", { class: "msn feature-name" }, a.msn), h("span", { class: "model" }, a.model || ""), a.registration ? h("span", { class: "reg" }, a.registration) : null),
+      h("div", { class: "top" }, h("span", { class: "msn feature-name" }, a.kind === "engine" ? h("span", { style: "font-size:13px;opacity:.75" }, "ESN ") : null, a.msn), h("span", { class: "model" }, a.model || ""), a.registration ? h("span", { class: "reg" }, a.registration) : null),
       h("dl", {},
         h("dt", {}, "Info date"), h("dd", {}, a.info_date || "–"),
         h("dt", {}, "Version"), h("dd", {}, `v${a.version || 1}`),
@@ -1042,8 +1050,8 @@ table.changes td.new { color: var(--ok); font-weight: 600; font-family: var(--mo
         h("dt", {}, "Last change"), h("dd", {}, a.last_change || "")))));
     $view.replaceChildren(
       h("div", { class: "fleet-head" }, h("div", { class: "grow" }, h("h1", {}, "Fleet spec sheets"),
-        h("div", { class: "muted" }, `${fleet.length} aircraft · PDF in the ACIA layout, generated from the latest saved version`)),
-        !canWrite ? h("span", { class: "chip" }, "View only") : null),
+        h("div", { class: "muted" }, `${fleet.filter((a) => a.kind !== "engine").length} aircraft · ${fleet.filter((a) => a.kind === "engine").length} engines · PDF in the ACIA layout, generated from the latest saved version`)),
+        !canWrite ? h("span", { class: "chip" }, "View only") : h("button", { class: "btn", disabled: !cap.db, onclick: newEngineDialog }, "+ New engine spec sheet")),
       drop, list);
   }
 
@@ -1108,6 +1116,23 @@ table.changes td.new { color: var(--ok); font-weight: 600; font-family: var(--mo
     } catch (e) { done(); toast(e.message || String(e), true); }
   }
 
+  function newEngineDialog() {
+    const v = { model: "", esn: "", year: "" };
+    const field = (label, key, ph) => { const id = fid("ne"); return h("div", { class: "field" }, h("label", { for: id }, label),
+      h("input", { class: "input", id, placeholder: ph, oninput: (e) => (v[key] = e.target.value.trim()) })); };
+    dialog("New engine spec sheet", h("div", {},
+      h("p", { class: "muted" }, "Creates an engine spec sheet with a General Description and an LLP table to fill in. The cover shows the matching engine graphic."),
+      h("div", { class: "grid3" }, field("Engine model", "model", "PW127M"), field("ESN", "esn", "PCE-ED0844"), field("Year of manufacture", "year", "2012"))),
+      [{ label: "Cancel" }, { label: "Create", cls: "primary", run: async () => {
+        if (!v.model || !v.esn) { toast("Enter the engine model and ESN.", true); return false; }
+        const id = "esn-" + v.esn.replace(/[^A-Za-z0-9_.\-]/g, "_");
+        const cur = await cap.db.doc("aircraft/" + id).get();
+        if (cur.exists && !cur.data().archived) { toast(`ESN ${v.esn} already has a spec sheet.`, true); return false; }
+        await saveVersion(id, C.newEngineSpec(v.model, v.esn, v.year), "Created", "", undefined);
+        location.hash = "#ac-" + id;
+      } }]);
+  }
+
   /** Write a new version and point the aircraft summary at it. expectVersion guards against overwriting someone else's save. */
   async function saveVersion(id, spec, source, note, expectVersion) {
     const sumRef = cap.db.doc("aircraft/" + id);
@@ -1120,7 +1145,7 @@ table.changes td.new { color: var(--ok); font-weight: 600; font-family: var(--mo
     spec.source = spec.source || {};
     await cap.db.doc(`aircraft/${id}/versions/${vid(n)}`).set({ n, created_at: nowIso(), by: me || "", source, note: note || "", spec });
     const findKv = (label) => { for (const s of spec.sections) if (s.type === "kv") for (const r of s.rows) if ((r.label || "").toUpperCase() === label) return r.value; return ""; };
-    await sumRef.set({ msn: String(spec.cover.msn || ""), model: spec.cover.model || "", registration: findKv("AIRCRAFT REGISTRATION"),
+    await sumRef.set({ kind: spec.cover.kind === "engine" ? "engine" : "aircraft", msn: String(spec.cover.msn || ""), model: spec.cover.model || "", registration: findKv("AIRCRAFT REGISTRATION"),
       info_date: findKv("INFORMATION DATE"), version: n, updated_at: nowIso(), updated_by: me || "", last_change: source, archived: false });
     return n;
   }
@@ -1168,7 +1193,7 @@ table.changes td.new { color: var(--ok); font-weight: 600; font-family: var(--mo
     const reg = kvValue(s, "AIRCRAFT REGISTRATION");
     const ro = !canWrite;
     const head = h("div", { class: "ws-head" },
-      h("div", { class: "title" }, h("h1", {}, h("span", { class: "feature-name", style: "color:inherit;font-size:inherit" }, `MSN ${c.msn || "?"}`), " ", h("span", {}, `${c.model || ""}${reg ? " · " + reg : ""}`)),
+      h("div", { class: "title" }, h("h1", {}, h("span", { class: "feature-name", style: "color:inherit;font-size:inherit" }, `${c.kind === "engine" ? "ESN" : "MSN"} ${c.msn || "?"}`), " ", h("span", {}, `${c.model || ""}${reg ? " · " + reg : ""}`)),
         h("div", { class: "row small muted" }, `Version ${ws.version}`, s.source && s.source.filename ? ` · from ${s.source.filename}` : "",
           h("span", { id: "state-chip", class: ws.dirty ? "chip dirty" : "chip ok" }, ws.dirty ? "Unsaved" : "Saved"))),
       ro ? h("span", { class: "chip" }, "View only") : null,
@@ -1286,11 +1311,17 @@ Answer with JSON only: {"summary": "one or two sentences", "ops": [{"op": "...",
       C.ENGINE_TYPES.map(([k, l]) => h("option", { value: k }, l)),
       h("option", { value: "none" }, "No illustration"));
     engSel.value = c.engine_illustration || "auto";
+    const isEngine = c.kind === "engine";
+    const kindId = fid("cv");
+    const kindSel = h("select", { class: "input", id: kindId, disabled: ro, onchange: (e) => { c.kind = e.target.value; markDirty(); renderWorkspace(); } },
+      h("option", { value: "aircraft" }, "Aircraft"), h("option", { value: "engine" }, "Engine"));
+    kindSel.value = isEngine ? "engine" : "aircraft";
     return h("div", { class: "panel pad" }, h("h2", { style: "margin-bottom:10px" }, "Cover page"),
-      h("div", { class: "grid3" }, f("Aircraft model", "model"), f("Aircraft MSN", "msn"), f("Year of manufacture", "year")),
+      h("div", { class: "grid3" }, f(isEngine ? "Engine model" : "Aircraft model", "model"), f(isEngine ? "ESN" : "Aircraft MSN", "msn"), f("Year of manufacture", "year")),
       h("div", { class: "grid2", style: "margin-top:12px" },
-        h("div", { class: "field" }, h("label", { for: selId }, "Aircraft illustration (cover)"), sel),
-        h("div", { class: "field" }, h("label", { for: engId }, "Engine illustration (Engines page)"), engSel)));
+        h("div", { class: "field" }, h("label", { for: kindId }, "Spec sheet for"), kindSel),
+        isEngine ? h("div", { class: "field" }, h("label", { for: engId }, "Engine illustration (cover)"), engSel)
+                 : h("div", { class: "field" }, h("label", { for: selId }, "Aircraft illustration (cover)"), sel)));
   }
   const headingAbove = (i) => { for (let k = i; k >= 0; k--) if (ws.spec.sections[k].type === "heading") return ws.spec.sections[k].title; return ""; };
 
@@ -1510,7 +1541,7 @@ Answer with JSON only: {"summary": "one or two sentences", "ops": [{"op": "...",
     const font = await pdfFonts();
     const key = C.aircraftKey(spec), eng = C.engineKey(spec);
     const dd = C.buildPdf(spec, settings, { logoWhite: A.logoWhite, logoColor: A.logoColor, images, fontName: font.name,
-                                            aircraft: key ? A.aircraft[key] : null, engine: eng ? A.engines[eng] : null });
+                                            aircraft: key ? A.aircraft[key] : null, engine: spec.cover.kind === "engine" && eng ? A.engines[eng] : null });
     return await new Promise((res, rej) => {
       try { window.pdfMake.createPdf(dd, null, font.fonts, font.vfs).getBuffer((buf) => res(new Uint8Array(buf))); } catch (e) { rej(e); }
     });

@@ -156,7 +156,7 @@
     else if (fleetError && !fleet.length) list = h("div", { class: "panel empty" }, fleetError);
     else if (!fleet.length) list = h("div", { class: "panel empty" }, h("h2", {}, "No spec sheets yet"), h("p", {}, "Upload the Excel tech spec for an aircraft to create its first spec sheet."));
     else list = h("div", { class: "fleet" }, fleet.map((a) => h("button", { class: "tail", onclick: () => (location.hash = "#ac-" + a.id) },
-      h("div", { class: "top" }, h("span", { class: "msn feature-name" }, a.msn), h("span", { class: "model" }, a.model || ""), a.registration ? h("span", { class: "reg" }, a.registration) : null),
+      h("div", { class: "top" }, h("span", { class: "msn feature-name" }, a.kind === "engine" ? h("span", { style: "font-size:13px;opacity:.75" }, "ESN ") : null, a.msn), h("span", { class: "model" }, a.model || ""), a.registration ? h("span", { class: "reg" }, a.registration) : null),
       h("dl", {},
         h("dt", {}, "Info date"), h("dd", {}, a.info_date || "–"),
         h("dt", {}, "Version"), h("dd", {}, `v${a.version || 1}`),
@@ -164,8 +164,8 @@
         h("dt", {}, "Last change"), h("dd", {}, a.last_change || "")))));
     $view.replaceChildren(
       h("div", { class: "fleet-head" }, h("div", { class: "grow" }, h("h1", {}, "Fleet spec sheets"),
-        h("div", { class: "muted" }, `${fleet.length} aircraft · PDF in the ACIA layout, generated from the latest saved version`)),
-        !canWrite ? h("span", { class: "chip" }, "View only") : null),
+        h("div", { class: "muted" }, `${fleet.filter((a) => a.kind !== "engine").length} aircraft · ${fleet.filter((a) => a.kind === "engine").length} engines · PDF in the ACIA layout, generated from the latest saved version`)),
+        !canWrite ? h("span", { class: "chip" }, "View only") : h("button", { class: "btn", disabled: !cap.db, onclick: newEngineDialog }, "+ New engine spec sheet")),
       drop, list);
   }
 
@@ -230,6 +230,23 @@
     } catch (e) { done(); toast(e.message || String(e), true); }
   }
 
+  function newEngineDialog() {
+    const v = { model: "", esn: "", year: "" };
+    const field = (label, key, ph) => { const id = fid("ne"); return h("div", { class: "field" }, h("label", { for: id }, label),
+      h("input", { class: "input", id, placeholder: ph, oninput: (e) => (v[key] = e.target.value.trim()) })); };
+    dialog("New engine spec sheet", h("div", {},
+      h("p", { class: "muted" }, "Creates an engine spec sheet with a General Description and an LLP table to fill in. The cover shows the matching engine graphic."),
+      h("div", { class: "grid3" }, field("Engine model", "model", "PW127M"), field("ESN", "esn", "PCE-ED0844"), field("Year of manufacture", "year", "2012"))),
+      [{ label: "Cancel" }, { label: "Create", cls: "primary", run: async () => {
+        if (!v.model || !v.esn) { toast("Enter the engine model and ESN.", true); return false; }
+        const id = "esn-" + v.esn.replace(/[^A-Za-z0-9_.\-]/g, "_");
+        const cur = await cap.db.doc("aircraft/" + id).get();
+        if (cur.exists && !cur.data().archived) { toast(`ESN ${v.esn} already has a spec sheet.`, true); return false; }
+        await saveVersion(id, C.newEngineSpec(v.model, v.esn, v.year), "Created", "", undefined);
+        location.hash = "#ac-" + id;
+      } }]);
+  }
+
   /** Write a new version and point the aircraft summary at it. expectVersion guards against overwriting someone else's save. */
   async function saveVersion(id, spec, source, note, expectVersion) {
     const sumRef = cap.db.doc("aircraft/" + id);
@@ -242,7 +259,7 @@
     spec.source = spec.source || {};
     await cap.db.doc(`aircraft/${id}/versions/${vid(n)}`).set({ n, created_at: nowIso(), by: me || "", source, note: note || "", spec });
     const findKv = (label) => { for (const s of spec.sections) if (s.type === "kv") for (const r of s.rows) if ((r.label || "").toUpperCase() === label) return r.value; return ""; };
-    await sumRef.set({ msn: String(spec.cover.msn || ""), model: spec.cover.model || "", registration: findKv("AIRCRAFT REGISTRATION"),
+    await sumRef.set({ kind: spec.cover.kind === "engine" ? "engine" : "aircraft", msn: String(spec.cover.msn || ""), model: spec.cover.model || "", registration: findKv("AIRCRAFT REGISTRATION"),
       info_date: findKv("INFORMATION DATE"), version: n, updated_at: nowIso(), updated_by: me || "", last_change: source, archived: false });
     return n;
   }
@@ -290,7 +307,7 @@
     const reg = kvValue(s, "AIRCRAFT REGISTRATION");
     const ro = !canWrite;
     const head = h("div", { class: "ws-head" },
-      h("div", { class: "title" }, h("h1", {}, h("span", { class: "feature-name", style: "color:inherit;font-size:inherit" }, `MSN ${c.msn || "?"}`), " ", h("span", {}, `${c.model || ""}${reg ? " · " + reg : ""}`)),
+      h("div", { class: "title" }, h("h1", {}, h("span", { class: "feature-name", style: "color:inherit;font-size:inherit" }, `${c.kind === "engine" ? "ESN" : "MSN"} ${c.msn || "?"}`), " ", h("span", {}, `${c.model || ""}${reg ? " · " + reg : ""}`)),
         h("div", { class: "row small muted" }, `Version ${ws.version}`, s.source && s.source.filename ? ` · from ${s.source.filename}` : "",
           h("span", { id: "state-chip", class: ws.dirty ? "chip dirty" : "chip ok" }, ws.dirty ? "Unsaved" : "Saved"))),
       ro ? h("span", { class: "chip" }, "View only") : null,
@@ -408,11 +425,17 @@ Answer with JSON only: {"summary": "one or two sentences", "ops": [{"op": "...",
       C.ENGINE_TYPES.map(([k, l]) => h("option", { value: k }, l)),
       h("option", { value: "none" }, "No illustration"));
     engSel.value = c.engine_illustration || "auto";
+    const isEngine = c.kind === "engine";
+    const kindId = fid("cv");
+    const kindSel = h("select", { class: "input", id: kindId, disabled: ro, onchange: (e) => { c.kind = e.target.value; markDirty(); renderWorkspace(); } },
+      h("option", { value: "aircraft" }, "Aircraft"), h("option", { value: "engine" }, "Engine"));
+    kindSel.value = isEngine ? "engine" : "aircraft";
     return h("div", { class: "panel pad" }, h("h2", { style: "margin-bottom:10px" }, "Cover page"),
-      h("div", { class: "grid3" }, f("Aircraft model", "model"), f("Aircraft MSN", "msn"), f("Year of manufacture", "year")),
+      h("div", { class: "grid3" }, f(isEngine ? "Engine model" : "Aircraft model", "model"), f(isEngine ? "ESN" : "Aircraft MSN", "msn"), f("Year of manufacture", "year")),
       h("div", { class: "grid2", style: "margin-top:12px" },
-        h("div", { class: "field" }, h("label", { for: selId }, "Aircraft illustration (cover)"), sel),
-        h("div", { class: "field" }, h("label", { for: engId }, "Engine illustration (Engines page)"), engSel)));
+        h("div", { class: "field" }, h("label", { for: kindId }, "Spec sheet for"), kindSel),
+        isEngine ? h("div", { class: "field" }, h("label", { for: engId }, "Engine illustration (cover)"), engSel)
+                 : h("div", { class: "field" }, h("label", { for: selId }, "Aircraft illustration (cover)"), sel)));
   }
   const headingAbove = (i) => { for (let k = i; k >= 0; k--) if (ws.spec.sections[k].type === "heading") return ws.spec.sections[k].title; return ""; };
 
@@ -632,7 +655,7 @@ Answer with JSON only: {"summary": "one or two sentences", "ops": [{"op": "...",
     const font = await pdfFonts();
     const key = C.aircraftKey(spec), eng = C.engineKey(spec);
     const dd = C.buildPdf(spec, settings, { logoWhite: A.logoWhite, logoColor: A.logoColor, images, fontName: font.name,
-                                            aircraft: key ? A.aircraft[key] : null, engine: eng ? A.engines[eng] : null });
+                                            aircraft: key ? A.aircraft[key] : null, engine: spec.cover.kind === "engine" && eng ? A.engines[eng] : null });
     return await new Promise((res, rej) => {
       try { window.pdfMake.createPdf(dd, null, font.fonts, font.vfs).getBuffer((buf) => res(new Uint8Array(buf))); } catch (e) { rej(e); }
     });
