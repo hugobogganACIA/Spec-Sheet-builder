@@ -114,3 +114,16 @@ SPEC_SAMPLES=/path/to/specs pytest
   layouts used.
 * **AI model:** defaults to `claude-opus-5-5`. Override it with
   `SPEC_AI_MODEL` if needed.
+
+## Artifact version (runs on claude.ai)
+
+`artifact/` holds a single-page version of the builder that runs as a claude.ai
+artifact. It needs no server. It stores spec sheets and their versions in the
+artifact's shared database and LOPA and other images in the artifact's file
+store. It builds the PDF in the browser (pdfmake, Inter font, same layout) and
+sends "Ask for a change" requests to Claude through the viewer's own account.
+
+* `artifact/src/core.js`: Excel import (same label-based rules as `app/excel_import.py`), diff, edits and the PDF layout
+* `artifact/src/app.js`: the interface, storage, preview and download
+* `artifact/src/shell.html`: styles and page markup
+* `python3 artifact/build.py` assembles `artifact/spec-sheet-builder.html`, which is what gets published
