@@ -780,8 +780,6 @@ table.changes td.new { color: var(--ok); font-weight: 600; font-family: var(--mo
           // masthead with a livery-style diagonal and sky stripe
           { type: "polyline", closePath: true, points: [{ x: 0, y: 0 }, { x: PAGE_W, y: 0 }, { x: PAGE_W, y: 196 }, { x: 0, y: 252 }], color: SKY },
           { type: "polyline", closePath: true, points: [{ x: 0, y: 0 }, { x: PAGE_W, y: 0 }, { x: PAGE_W, y: 188 }, { x: 0, y: 244 }], color: NAVY },
-          // ground shadow under the aircraft
-          ...(assets.aircraft && assets.aircraft.src ? [{ type: "ellipse", x: PAGE_W / 2, y: 456, r1: 200, r2: 5, color: "#E7ECF5" }] : []),
           // facts strip rules
           { type: "line", x1: 36, y1: 474, x2: PAGE_W - 36, y2: 474, lineWidth: 0.8, lineColor: NAVY },
           ...[1, 2, 3].map((i) => ({ type: "line", x1: 36 + i * (PAGE_W - 72) / 4, y1: 486, x2: 36 + i * (PAGE_W - 72) / 4, y2: 520, lineWidth: 0.5, lineColor: RULE })),
