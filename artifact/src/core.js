@@ -419,7 +419,7 @@
   }
 
   // ---------------------------------------------------------------- PDF (pdfmake definition)
-  const PAGE_W = 540, PAGE_H = 780, NAVY = "#003087", SKY = "#00A9E0", STRIPE = "#F1F3F9", INK = "#1B2233", RULE = "#C9D3E8";
+  const PAGE_W = 540, PAGE_H = 780, NAVY = "#003087", SKY = "#00A9E0", STRIPE = "#F1F3F9", INK = "#011135", RULE = "#C9D3E8";
 
   /**
    * spec, settings, assets = { logoWhite, logoColor, images: {assetId: dataUrl} } -> pdfmake doc definition.
@@ -436,7 +436,7 @@
       const y = 222 + i * 30;
       content.push({ columns: [{ width: 160, text: k, alignment: "center", color: "#FFFFFF", fontSize: 9.5, characterSpacing: 0.3 }],
                      absolutePosition: { x: 46, y: y + 5.5 } });
-      content.push({ columns: [{ width: 280, text: v || "", alignment: "center", color: NAVY, bold: true, fontSize: 10 }],
+      content.push({ columns: [{ width: 280, text: v || "", alignment: "center", color: NAVY, font: "Feature", fontSize: 10 }],
                      absolutePosition: { x: 214, y: y + 5.5 } });
     });
     const contacts = settings.contacts || [];
@@ -460,7 +460,7 @@
     // ---- body
     let first = true;
     const h2 = (t, brk) => ({ stack: [
-      { text: t, fontSize: 12.5, bold: true, color: NAVY, characterSpacing: 0.2 },
+      { text: t, font: "Heading", fontSize: 12.5, color: NAVY },
       { canvas: [{ type: "line", x1: 0, y1: 2, x2: PAGE_W - 64, y2: 2, lineWidth: 1.2, lineColor: NAVY }] }],
       margin: [0, 4, 0, 6], pageBreak: brk ? "before" : undefined, headlineLevel: 1 });
     const zebra = { hLineWidth: () => 0, vLineWidth: () => 0, paddingTop: () => 2.4, paddingBottom: () => 2.4,
@@ -540,7 +540,7 @@
       pageSize: { width: PAGE_W, height: PAGE_H },
       pageMargins: [32, 74, 32, 46],
       info: { title: `MSN ${cover.msn || ""} ${cover.model || ""} - ${settings.doc_title || ""}`, author: settings.company || "" },
-      defaultStyle: { font: assets.fontName || "Inter", fontSize: 7.4, color: INK, lineHeight: 1.1 },
+      defaultStyle: { font: assets.fontName || "Archivo", fontSize: 7.4, color: INK, lineHeight: 1.1 },
       background: (page) => page === 1 ? { canvas: [
           { type: "rect", x: 0, y: 0, w: PAGE_W, h: PAGE_H, color: SKY },
           { type: "polyline", closePath: true, points: [{ x: 0, y: 0 }, { x: PAGE_W, y: 0 }, { x: PAGE_W, y: PAGE_H * 0.58 }, { x: 0, y: PAGE_H * 0.625 }], color: NAVY },

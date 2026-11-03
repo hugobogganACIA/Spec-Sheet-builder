@@ -1,41 +1,45 @@
 <title>ACIA Spec Sheet Builder</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 /* Layout: navy masthead, then a two-pane workspace (editor | live PDF) that stacks on narrow screens. */
 :root {
   --navy: #003087; --sky: #00a9e0;
   --bg: #f3f5f9; --surface: #ffffff; --surface-2: #e8ecf3; --line: #d8deea; --line-strong: #b8c3d9;
-  --fg: #172036; --muted: #5d6882; --accent: #003087; --accent-fg: #ffffff; --accent-2: #00a9e0;
+  --fg: #011135; --heading: #003087; --muted: #5d6882; --accent: #003087; --accent-fg: #ffffff; --accent-2: #00a9e0;
   --field-hover: #f6f8fc; --hl: #fff2c2; --hl-fg: #5c4500;
   --ok: #17784b; --danger: #b3261e; --warn-bg: #fff6e0; --warn-line: #ecd29a; --warn-fg: #6b4a07;
   --mast: #003087; --mast-fg: #ffffff;
-  --display: "Barlow Semi Condensed", "Arial Narrow", Arial, sans-serif;
-  --body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --display: "Archivo", "Arial Narrow", Arial, sans-serif;
+  --body: "Archivo", "Segoe UI", system-ui, sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
   --radius: 6px;
 }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
   --bg: #0d1424; --surface: #151e33; --surface-2: #0a101d; --line: #26324d; --line-strong: #3a4a6d;
-  --fg: #e3e8f4; --muted: #94a0bb; --accent: #4f86f0; --accent-fg: #ffffff; --accent-2: #3cc3f0;
+  --fg: #e3e8f4; --heading: #9dbcff; --muted: #94a0bb; --accent: #4f86f0; --accent-fg: #ffffff; --accent-2: #3cc3f0;
   --field-hover: #1b2640; --hl: #4a3d0d; --hl-fg: #ffe9a6;
   --ok: #4cc38a; --danger: #ff8a80; --warn-bg: #2d2410; --warn-line: #5c4a1a; --warn-fg: #f3d68e;
   --mast: #001c52; --mast-fg: #ffffff; color-scheme: dark; } }
 :root[data-theme="dark"] {
   --bg: #0d1424; --surface: #151e33; --surface-2: #0a101d; --line: #26324d; --line-strong: #3a4a6d;
-  --fg: #e3e8f4; --muted: #94a0bb; --accent: #4f86f0; --accent-fg: #ffffff; --accent-2: #3cc3f0;
+  --fg: #e3e8f4; --heading: #9dbcff; --muted: #94a0bb; --accent: #4f86f0; --accent-fg: #ffffff; --accent-2: #3cc3f0;
   --field-hover: #1b2640; --hl: #4a3d0d; --hl-fg: #ffe9a6;
   --ok: #4cc38a; --danger: #ff8a80; --warn-bg: #2d2410; --warn-line: #5c4a1a; --warn-fg: #f3d68e;
   --mast: #001c52; --mast-fg: #ffffff; color-scheme: dark; }
 
 * { box-sizing: border-box; }
 html, body { background: var(--bg); color: var(--fg); }
-body { font: 14px/1.45 var(--body); min-height: 100%; }
+body { font: 400 14px/1.45 var(--body); font-variation-settings: "wdth" 100; color: var(--fg); min-height: 100%; }
 body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 30; background: var(--mast); }
-h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; letter-spacing: .01em; }
-h1 { font-size: 26px; font-weight: 700; }
-h2 { font-size: 18px; font-weight: 600; }
+/* ACIA website type: Archivo; headings 600 at wdth 112, feature names 700 at wdth 125 (used sparingly). */
+h1, h2, h3 { font-family: var(--display); font-weight: 600; font-variation-settings: "wdth" 112; color: var(--heading); text-wrap: balance; margin: 0; }
+h1 { font-size: 26px; }
+h2 { font-size: 18px; }
+.feature-name { font-weight: 700; font-variation-settings: "wdth" 125; }
 button, input, textarea, select { font: inherit; color: inherit; }
 :focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
 .wrap { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
@@ -43,7 +47,7 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .mast { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20; background: var(--mast); color: var(--mast-fg); }
 .mast .inner { display: flex; align-items: center; gap: 16px; height: 54px; max-width: 1640px; margin: 0 auto; }
 .mast img { height: 24px; display: block; }
-.mast .app { font-family: var(--display); font-weight: 600; font-size: 17px; padding-left: 16px; border-left: 1px solid rgba(255,255,255,.3); letter-spacing: .02em; }
+.mast .app { font-family: var(--display); font-weight: 600; font-variation-settings: "wdth" 112; font-size: 17px; padding-left: 16px; border-left: 1px solid rgba(255,255,255,.3); letter-spacing: .02em; }
 .mast nav { margin-left: auto; display: flex; gap: 4px; }
 .mast nav a { color: var(--mast-fg); text-decoration: none; padding: 6px 12px; border-radius: 4px; opacity: .8; font-weight: 500; }
 .mast nav a[aria-current="page"], .mast nav a:hover { opacity: 1; background: rgba(255,255,255,.12); }
@@ -83,9 +87,9 @@ main { max-width: 1640px; margin: 0 auto; padding-block: 22px 60px; }
 .tail { text-align: left; cursor: pointer; padding: 0; overflow: hidden; display: flex; flex-direction: column; border: 1px solid var(--line); background: var(--surface); border-radius: var(--radius); }
 .tail:hover { border-color: var(--accent); }
 .tail .top { background: var(--mast); color: var(--mast-fg); padding: 12px 14px 10px; display: flex; align-items: baseline; gap: 10px; }
-.tail .msn { font-family: var(--display); font-size: 28px; font-weight: 700; line-height: 1; }
-.tail .model { font-family: var(--display); font-size: 15px; opacity: .85; }
-.tail .reg { margin-left: auto; font-family: var(--mono); font-size: 13px; background: rgba(255,255,255,.14); padding: 2px 7px; border-radius: 3px; }
+.tail .msn { font-family: var(--display); font-size: 28px; line-height: 1; }
+.tail .model { font-family: var(--display); font-size: 15px; font-variation-settings: "wdth" 100; opacity: .85; white-space: nowrap; }
+.tail .reg { white-space: nowrap; margin-left: auto; font-family: var(--mono); font-size: 13px; background: rgba(255,255,255,.14); padding: 2px 7px; border-radius: 3px; }
 .tail dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; margin: 0; padding: 12px 14px; font-size: 13px; }
 .tail dt { color: var(--muted); }
 .tail dd { margin: 0; font-family: var(--mono); font-size: 12.5px; min-width: 0; overflow-wrap: anywhere; }
@@ -113,7 +117,7 @@ main { max-width: 1640px; margin: 0 auto; padding-block: 22px 60px; }
 .sec.is-hidden { opacity: .55; }
 .sec-head { display: flex; align-items: center; gap: 6px; padding: 6px 10px; background: var(--field-hover); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
 .sec-head .kind { font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--accent-2); width: 50px; flex: none; }
-.sec-head .t { flex: 1; min-width: 140px; font-family: var(--display); font-weight: 600; font-size: 16px; border: 1px solid transparent; background: transparent; padding: 3px 6px; border-radius: 4px; }
+.sec-head .t { flex: 1; min-width: 140px; font-family: var(--display); font-weight: 600; font-variation-settings: "wdth" 112; font-size: 16px; border: 1px solid transparent; background: transparent; padding: 3px 6px; border-radius: 4px; }
 .sec-head .t:hover, .sec-head .t:focus { background: var(--surface); border-color: var(--line); }
 .sec.heading .sec-head { background: var(--mast); border-bottom: 0; }
 .sec.heading .sec-head .t { color: var(--mast-fg); font-size: 18px; letter-spacing: .03em; }
@@ -129,7 +133,7 @@ main { max-width: 1640px; margin: 0 auto; padding-block: 22px 60px; }
 .cellin:hover { border-color: var(--line); background: var(--surface); }
 .cellin:focus { background: var(--surface); border-color: var(--accent-2); outline: none; }
 td.lbl .cellin { font-family: var(--body); font-weight: 600; font-size: 12.5px; }
-th .cellin { font-family: var(--display); font-weight: 600; color: var(--accent); text-align: center; font-size: 13px; }
+th .cellin { font-family: var(--display); font-weight: 600; font-variation-settings: "wdth" 112; color: var(--accent); text-align: center; font-size: 13px; }
 td.c .cellin { text-align: center; min-width: 76px; }
 td.hl .cellin { background: var(--hl); color: var(--hl-fg); }
 td.x { width: 26px; }

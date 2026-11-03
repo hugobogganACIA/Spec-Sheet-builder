@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const C = window.SpecCore;
-  const A = window.SPEC_ASSETS; // logos + Inter fonts for the PDF
+  const A = window.SPEC_ASSETS; // logos + Archivo fonts for the PDF
 
   // ------------------------------------------------------------ small helpers
   function h(tag, attrs, ...kids) {
@@ -156,7 +156,7 @@
     else if (fleetError && !fleet.length) list = h("div", { class: "panel empty" }, fleetError);
     else if (!fleet.length) list = h("div", { class: "panel empty" }, h("h2", {}, "No spec sheets yet"), h("p", {}, "Upload the Excel tech spec for an aircraft to create its first spec sheet."));
     else list = h("div", { class: "fleet" }, fleet.map((a) => h("button", { class: "tail", onclick: () => (location.hash = "#ac-" + a.id) },
-      h("div", { class: "top" }, h("span", { class: "msn" }, a.msn), h("span", { class: "model" }, a.model || ""), a.registration ? h("span", { class: "reg" }, a.registration) : null),
+      h("div", { class: "top" }, h("span", { class: "msn feature-name" }, a.msn), h("span", { class: "model" }, a.model || ""), a.registration ? h("span", { class: "reg" }, a.registration) : null),
       h("dl", {},
         h("dt", {}, "Info date"), h("dd", {}, a.info_date || "–"),
         h("dt", {}, "Version"), h("dd", {}, `v${a.version || 1}`),
@@ -290,7 +290,7 @@
     const reg = kvValue(s, "AIRCRAFT REGISTRATION");
     const ro = !canWrite;
     const head = h("div", { class: "ws-head" },
-      h("div", { class: "title" }, h("h1", {}, `MSN ${c.msn || "?"} `, h("span", {}, `${c.model || ""}${reg ? " · " + reg : ""}`)),
+      h("div", { class: "title" }, h("h1", {}, h("span", { class: "feature-name", style: "color:inherit;font-size:inherit" }, `MSN ${c.msn || "?"}`), " ", h("span", {}, `${c.model || ""}${reg ? " · " + reg : ""}`)),
         h("div", { class: "row small muted" }, `Version ${ws.version}`, s.source && s.source.filename ? ` · from ${s.source.filename}` : "",
           h("span", { id: "state-chip", class: ws.dirty ? "chip dirty" : "chip ok" }, ws.dirty ? "Unsaved" : "Saved"))),
       ro ? h("span", { class: "chip" }, "View only") : null,
@@ -549,7 +549,12 @@ Answer with JSON only: {"summary": "one or two sentences", "ops": [{"op": "...",
     return p;
   }
 
-  const FONTS = { Inter: { normal: "Inter-Regular.ttf", bold: "Inter-Bold.ttf", italics: "Inter-Italic.ttf", bolditalics: "Inter-BoldItalic.ttf" } };
+  const one = (f) => ({ normal: f, bold: f, italics: f, bolditalics: f });
+  const FONTS = {
+    Archivo: { normal: "Archivo-Regular.ttf", bold: "Archivo-Bold.ttf", italics: "Archivo-Italic.ttf", bolditalics: "Archivo-BoldItalic.ttf" },
+    Heading: one("Archivo-SemiExpanded-SemiBold.ttf"), // headings: 600, wdth 112
+    Feature: one("Archivo-Expanded-Bold.ttf"),         // feature names: 700, wdth 125
+  };
   const FONT_SLOTS = [
     ["normal", "Regular", "400", "normal"], ["bold", "Bold (Medium or Semibold)", "600", "normal"],
     ["italics", "Italic", "400", "italic"], ["bolditalics", "Bold italic", "600", "italic"]];
@@ -565,19 +570,20 @@ Answer with JSON only: {"summary": "one or two sentences", "ops": [{"op": "...",
     for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000));
     return btoa(s);
   }
-  /** Fonts for pdfmake: the uploaded brand font when there is one, Inter otherwise. Missing styles fall back sensibly. */
+  /** Fonts for pdfmake: the uploaded brand font when there is one, Archivo otherwise. Missing styles fall back sensibly. */
   async function pdfFonts() {
     const f = settings.font;
-    if (!f || !f.normal) return { fonts: FONTS, vfs: A.fonts, name: "Inter" };
+    if (!f || !f.normal) return { fonts: FONTS, vfs: A.fonts, name: "Archivo" };
     const vfs = { ...A.fonts }; const files = {};
     for (const [slot] of FONT_SLOTS) {
       if (!f[slot]) continue;
       const buf = await fontBytes(f[slot]);
       if (buf) { vfs[`Brand-${slot}`] = toBase64(buf); files[slot] = `Brand-${slot}`; }
     }
-    if (!files.normal) return { fonts: FONTS, vfs: A.fonts, name: "Inter" };
+    if (!files.normal) return { fonts: FONTS, vfs: A.fonts, name: "Archivo" };
     const bold = files.bold || files.normal;
-    return { fonts: { ...FONTS, Brand: { normal: files.normal, bold, italics: files.italics || files.normal, bolditalics: files.bolditalics || bold } }, vfs, name: "Brand" };
+    return { fonts: { ...FONTS, Brand: { normal: files.normal, bold, italics: files.italics || files.normal, bolditalics: files.bolditalics || bold },
+                      Heading: one(bold), Feature: one(bold) }, vfs, name: "Brand" };
   }
   /** Use the brand font for the app's own text too. */
   let uiFontKey = "";
@@ -596,8 +602,8 @@ Answer with JSON only: {"summary": "one or two sentences", "ops": [{"op": "...",
       try { const face = new FontFace("ACIA Brand", buf, { weight, style }); await face.load(); document.fonts.add(face); any = true; } catch (_) {}
     }
     if (any) {
-      root.setProperty("--body", '"ACIA Brand", "IBM Plex Sans", system-ui, sans-serif');
-      root.setProperty("--display", '"ACIA Brand", "Barlow Semi Condensed", Arial, sans-serif');
+      root.setProperty("--body", '"ACIA Brand", "Archivo", system-ui, sans-serif');
+      root.setProperty("--display", '"ACIA Brand", "Archivo", Arial, sans-serif');
     }
   }
 
@@ -666,7 +672,7 @@ Answer with JSON only: {"summary": "one or two sentences", "ops": [{"op": "...",
       box.replaceChildren(
         h("p", { class: "small muted", style: "margin:4px 0 10px" },
           "The ACIA website uses Canada Type Gibson. Upload the Gibson font files your licence covers (.otf, .ttf or .woff) and the PDFs and this app will use them. ",
-          "Until a Regular file is uploaded, PDFs use Inter. A missing style falls back to the closest one you uploaded."),
+          "Until a Regular file is uploaded, PDFs and the app use Archivo. A missing style falls back to the closest one you uploaded."),
         h("div", { class: "grid2" }, FONT_SLOTS.map(([slot, label]) => h("div", { class: "field" }, h("label", {}, label),
           h("div", { class: "row", style: "flex-wrap:nowrap" },
             h("span", { class: f[slot] ? "chip ok" : "chip" }, f[slot] ? "Uploaded" : "Not set"),

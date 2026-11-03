@@ -18,8 +18,8 @@ assets = {
     "logoWhite": data_uri(STATIC / "img" / "logo_white.png", "image/png"),
     "logoColor": data_uri(STATIC / "img" / "logo_color.png", "image/png"),
     # pdfmake virtual file system: file name -> base64
-    "fonts": {f"Inter-{w}.ttf": base64.b64encode((STATIC / "fonts" / f"Inter-{w}.ttf").read_bytes()).decode()
-              for w in ("Regular", "Bold", "Italic", "BoldItalic")},
+    "fonts": {f"Archivo-{w}.ttf": base64.b64encode((STATIC / "fonts" / f"Archivo-{w}.ttf").read_bytes()).decode()
+              for w in ("Regular", "Bold", "Italic", "BoldItalic", "SemiExpanded-SemiBold", "Expanded-Bold")},
 }
 
 src = HERE / "src"
