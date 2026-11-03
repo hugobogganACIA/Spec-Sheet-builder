@@ -17,10 +17,19 @@ def data_uri(path: Path, mime: str) -> str:
 assets = {
     "logoWhite": data_uri(STATIC / "img" / "logo_white.png", "image/png"),
     "logoColor": data_uri(STATIC / "img" / "logo_color.png", "image/png"),
+    # cover illustrations by aircraft type: data URI + width/height ratio
+    "aircraft": {},
     # pdfmake virtual file system: file name -> base64
     "fonts": {f"Archivo-{w}.ttf": base64.b64encode((STATIC / "fonts" / f"Archivo-{w}.ttf").read_bytes()).decode()
               for w in ("Regular", "Bold", "Italic", "BoldItalic", "SemiExpanded-SemiBold", "Expanded-Bold")},
 }
+
+from PIL import Image  # noqa: E402
+
+for img in sorted((HERE / "img").glob("aircraft-*.png")):
+    with Image.open(img) as im:
+        ratio = im.width / im.height
+    assets["aircraft"][img.stem.split("-", 1)[1]] = {"src": data_uri(img, "image/png"), "ratio": round(ratio, 4)}
 
 src = HERE / "src"
 page = "\n".join([

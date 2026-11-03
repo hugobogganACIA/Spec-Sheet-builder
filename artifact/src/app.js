@@ -392,8 +392,17 @@ Answer with JSON only: {"summary": "one or two sentences", "ops": [{"op": "...",
   function coverPanel(ro) {
     const c = ws.spec.cover;
     const f = (label, key) => { const id = fid("cv"); return h("div", { class: "field" }, h("label", { for: id }, label), h("input", { class: "input", id, value: c[key] || "", disabled: ro, oninput: (e) => { c[key] = e.target.value; markDirty(); } })); };
+    const detected = C.aircraftKey({ ...ws.spec, cover: { ...c, illustration: "auto" } });
+    const label = (k) => (C.AIRCRAFT_TYPES.find((t) => t[0] === k) || [k, k])[1];
+    const selId = fid("cv");
+    const sel = h("select", { class: "input", id: selId, disabled: ro, onchange: (e) => { c.illustration = e.target.value; markDirty(); } },
+      h("option", { value: "auto" }, detected ? `Automatic (${label(detected)})` : "Automatic (type not recognised)"),
+      C.AIRCRAFT_TYPES.map(([k, l]) => h("option", { value: k }, l)),
+      h("option", { value: "none" }, "No illustration"));
+    sel.value = c.illustration || "auto";
     return h("div", { class: "panel pad" }, h("h2", { style: "margin-bottom:10px" }, "Cover page"),
-      h("div", { class: "grid3" }, f("Aircraft model", "model"), f("Aircraft MSN", "msn"), f("Year of manufacture", "year")));
+      h("div", { class: "grid3" }, f("Aircraft model", "model"), f("Aircraft MSN", "msn"), f("Year of manufacture", "year")),
+      h("div", { class: "field", style: "margin-top:12px;max-width:340px" }, h("label", { for: selId }, "Aircraft illustration"), sel));
   }
   const headingAbove = (i) => { for (let k = i; k >= 0; k--) if (ws.spec.sections[k].type === "heading") return ws.spec.sections[k].title; return ""; };
 
@@ -611,7 +620,9 @@ Answer with JSON only: {"summary": "one or two sentences", "ops": [{"op": "...",
     const images = {};
     for (const a of spec.attachments || []) if (!a.hidden && a.asset) { const d = await assetDataUrl(a.asset); if (d) images[a.asset] = d; }
     const font = await pdfFonts();
-    const dd = C.buildPdf(spec, settings, { logoWhite: A.logoWhite, logoColor: A.logoColor, images, fontName: font.name });
+    const key = C.aircraftKey(spec);
+    const dd = C.buildPdf(spec, settings, { logoWhite: A.logoWhite, logoColor: A.logoColor, images, fontName: font.name,
+                                            aircraft: key ? A.aircraft[key] : null });
     return await new Promise((res, rej) => {
       try { window.pdfMake.createPdf(dd, null, font.fonts, font.vfs).getBuffer((buf) => res(new Uint8Array(buf))); } catch (e) { rej(e); }
     });

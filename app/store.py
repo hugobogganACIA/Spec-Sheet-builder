@@ -23,12 +23,11 @@ DEFAULT_SETTINGS = {
     "confidential": "STRICTLY PRIVATE AND CONFIDENTIAL",
     "contacts_heading": "For Additional Summary, Please Contact:",
     "contacts": [
-        {"name": "Mark Dunnachie", "title": "SVP Commercial",
-         "email": "mark.dunnachie@aciaeroleasing.com", "phone": "+33 7 88 95 09 58"},
         {"name": "Patrick O’Reilly", "title": "Commercial Director",
          "email": "patrick.oreilly@aciaaeroleasing.com", "phone": "+353 86 234 9457"},
         {"name": "Hugo Boggan", "title": "Commercial Manager",
          "email": "hugo.boggan@aciaaeroleasing.com", "phone": "+353 87 350 7876"},
+        {"name": "Sean Geoghegan", "title": "", "email": "", "phone": ""},
     ],
     "disclaimer": (
         "This summary has been prepared by ACIA Aero Leasing for information purposes only. While the "

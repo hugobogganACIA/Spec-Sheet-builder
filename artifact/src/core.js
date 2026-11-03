@@ -429,31 +429,64 @@
     const cover = spec.cover || {};
     const content = [];
 
-    // ---- cover (page 1): text placed absolutely over the background drawing
-    content.push({ image: assets.logoWhite, width: 200, absolutePosition: { x: (PAGE_W - 200) / 2, y: 52 } });
-    const facts = [["AIRCRAFT MODEL", cover.model], ["AIRCRAFT MSN", cover.msn], ["YEAR OF MANUFACTURE", cover.year]];
-    facts.forEach(([k, v], i) => {
-      const y = 222 + i * 30;
-      content.push({ columns: [{ width: 160, text: k, alignment: "center", color: "#FFFFFF", fontSize: 9.5, characterSpacing: 0.3 }],
-                     absolutePosition: { x: 46, y: y + 5.5 } });
-      content.push({ columns: [{ width: 280, text: v || "", alignment: "center", color: NAVY, font: "Feature", fontSize: 10 }],
-                     absolutePosition: { x: 214, y: y + 5.5 } });
-    });
-    const contacts = settings.contacts || [];
-    const person = (c, align) => ({ stack: [
-      { text: c.name || "", bold: true, color: NAVY, fontSize: 9 },
-      { text: c.title || "", color: "#FFFFFF" },
-      { text: c.email || "", color: "#FFFFFF", decoration: "underline" },
-      { text: c.phone || "", color: "#FFFFFF" }], alignment: align || "center", fontSize: 8.6, lineHeight: 1.12 });
-    const contactStack = [{ text: settings.contacts_heading || "", italics: true, bold: true, color: "#FFFFFF", fontSize: 10, alignment: "center", margin: [0, 0, 0, 12] }];
-    if (contacts[0]) contactStack.push(person(contacts[0]));
-    for (let i = 1; i < contacts.length; i += 2) {
-      const row = contacts.slice(i, i + 2).map((c) => ({ ...person(c), width: "*" }));
-      contactStack.push({ columns: row, margin: [0, 14, 0, 0] });
+    // ---- cover (page 1): navy masthead with the model, the aircraft type's illustration
+    // on white, a facts strip, then contacts and disclaimer on a navy footer band.
+    const kvFind = (label, underHeading) => {
+      let hd = "";
+      for (const s of spec.sections || []) {
+        if (s.type === "heading") { hd = (s.title || "").toUpperCase(); continue; }
+        if (s.type !== "kv" || (underHeading && hd !== underHeading)) continue;
+        for (const r of s.rows) if ((r.label || "").toUpperCase() === label) return r.value || "";
+      }
+      return "";
+    };
+    const white = "#FFFFFF", paleSky = "#9FDDF4";
+    const at = (x, y, width, node) => content.push({ columns: [{ width, ...node }], absolutePosition: { x, y } });
+
+    content.push({ image: assets.logoWhite, width: 132, absolutePosition: { x: 36, y: 34 } });
+    at(PAGE_W - 236, 38, 200, { text: (settings.doc_title || "").toUpperCase(), alignment: "right", color: white, font: "Heading", fontSize: 7.5, characterSpacing: 1 });
+    const infoDate = kvFind("INFORMATION DATE");
+    if (infoDate) at(PAGE_W - 236, 50, 200, { text: `Status as of ${infoDate}`, alignment: "right", color: paleSky, fontSize: 7.5 });
+
+    at(36, 112, 470, { text: "AIRCRAFT MODEL", color: paleSky, font: "Heading", fontSize: 8, characterSpacing: 1.6 });
+    at(36, 126, 470, { text: cover.model || "", color: white, font: "Feature", fontSize: 38, lineHeight: 1 });
+    at(36, 178, 470, { text: [{ text: "MSN ", color: paleSky }, { text: cover.msn || "", color: white }], font: "Heading", fontSize: 18 });
+
+    // Illustration: sits on a ground line, centred, scaled to the type's proportions.
+    const art = assets.aircraft;
+    const groundY = 452;
+    if (art && art.src) {
+      const maxW = 476, maxH = 168;
+      const w = Math.min(maxW, maxH * art.ratio), hgt = w / art.ratio;
+      content.push({ image: art.src, width: w, absolutePosition: { x: (PAGE_W - w) / 2, y: groundY - hgt } });
     }
-    content.push({ columns: [{ width: PAGE_W - 60, stack: contactStack }], absolutePosition: { x: 30, y: 492 } });
-    content.push({ columns: [{ width: PAGE_W - 80, text: settings.disclaimer || "", alignment: "center",
-                   italics: true, fontSize: 5.2, color: NAVY, lineHeight: 1.15 }], absolutePosition: { x: 40, y: 712 } });
+
+    const facts = [
+      ["MSN", cover.msn],
+      ["YEAR BUILT", cover.year],
+      ["REGISTRATION", kvFind("AIRCRAFT REGISTRATION")],
+      kvFind("MODEL", "ENGINES") ? ["ENGINES", kvFind("MODEL", "ENGINES")] : ["CONFIGURATION", kvFind("AIRCRAFT CONFIGURATION")],
+    ];
+    const colW = (PAGE_W - 72) / facts.length;
+    facts.forEach(([k, v], i) => {
+      at(36 + i * colW + (i ? 12 : 0), 486, colW - 14, { stack: [
+        { text: k, color: SKY, font: "Heading", fontSize: 6.8, characterSpacing: 1.1 },
+        { text: v || "–", color: NAVY, font: "Heading", fontSize: 13, margin: [0, 4, 0, 0] }] });
+    });
+
+    const contacts = (settings.contacts || []).filter((c) => c && (c.name || c.email));
+    at(36, 588, PAGE_W - 72, { text: settings.contacts_heading || "", color: paleSky, font: "Heading", fontSize: 8, characterSpacing: 1 });
+    const perRow = Math.min(3, Math.max(1, contacts.length));
+    for (let i = 0; i < contacts.length; i += perRow) {
+      const row = contacts.slice(i, i + perRow).map((c) => ({ width: "*", stack: [
+        { text: c.name || "", color: white, font: "Heading", fontSize: 10 },
+        c.title ? { text: c.title, color: paleSky, fontSize: 7.6, margin: [0, 1, 0, 3] } : { text: "", margin: [0, 0, 0, 3] },
+        c.email ? { text: c.email, color: white, fontSize: 7.4 } : null,
+        c.phone ? { text: c.phone, color: white, fontSize: 7.4 } : null].filter(Boolean) }));
+      while (row.length < perRow) row.push({ width: "*", text: "" });
+      at(36, 606 + (i / perRow) * 54, PAGE_W - 72, { columns: row, columnGap: 14 });
+    }
+    at(36, 716, PAGE_W - 72, { text: settings.disclaimer || "", color: paleSky, fontSize: 4.9, lineHeight: 1.12, alignment: "justify" });
     // Cover texts are absolutely placed; start the body on page 2.
     content.push({ text: "", pageBreak: "after" });
 
@@ -542,15 +575,17 @@
       info: { title: `MSN ${cover.msn || ""} ${cover.model || ""} - ${settings.doc_title || ""}`, author: settings.company || "" },
       defaultStyle: { font: assets.fontName || "Archivo", fontSize: 7.4, color: INK, lineHeight: 1.1 },
       background: (page) => page === 1 ? { canvas: [
-          { type: "rect", x: 0, y: 0, w: PAGE_W, h: PAGE_H, color: SKY },
-          { type: "polyline", closePath: true, points: [{ x: 0, y: 0 }, { x: PAGE_W, y: 0 }, { x: PAGE_W, y: PAGE_H * 0.58 }, { x: 0, y: PAGE_H * 0.625 }], color: NAVY },
-          ...[0, 1, 2].flatMap((i) => {
-            const y = 222 + i * 30, sk = 5;
-            return [
-              { type: "polyline", closePath: true, points: [{ x: 46 + sk, y }, { x: 206 + sk, y }, { x: 206 - sk, y: y + 20 }, { x: 46 - sk, y: y + 20 }], color: SKY },
-              { type: "polyline", closePath: true, points: [{ x: 214 + sk, y }, { x: 494 + sk, y }, { x: 494 - sk, y: y + 20 }, { x: 214 - sk, y: y + 20 }], color: "#FFFFFF" },
-            ];
-          })] }
+          // masthead with a livery-style diagonal and sky stripe
+          { type: "polyline", closePath: true, points: [{ x: 0, y: 0 }, { x: PAGE_W, y: 0 }, { x: PAGE_W, y: 196 }, { x: 0, y: 252 }], color: SKY },
+          { type: "polyline", closePath: true, points: [{ x: 0, y: 0 }, { x: PAGE_W, y: 0 }, { x: PAGE_W, y: 188 }, { x: 0, y: 244 }], color: NAVY },
+          // ground shadow under the aircraft
+          ...(assets.aircraft && assets.aircraft.src ? [{ type: "ellipse", x: PAGE_W / 2, y: 456, r1: 200, r2: 5, color: "#E7ECF5" }] : []),
+          // facts strip rules
+          { type: "line", x1: 36, y1: 474, x2: PAGE_W - 36, y2: 474, lineWidth: 0.8, lineColor: NAVY },
+          ...[1, 2, 3].map((i) => ({ type: "line", x1: 36 + i * (PAGE_W - 72) / 4, y1: 486, x2: 36 + i * (PAGE_W - 72) / 4, y2: 520, lineWidth: 0.5, lineColor: RULE })),
+          // contacts band
+          { type: "polyline", closePath: true, points: [{ x: 0, y: 560 }, { x: PAGE_W, y: 548 }, { x: PAGE_W, y: PAGE_H }, { x: 0, y: PAGE_H }], color: NAVY },
+          { type: "polyline", closePath: true, points: [{ x: 0, y: 556 }, { x: PAGE_W, y: 544 }, { x: PAGE_W, y: 548 }, { x: 0, y: 560 }], color: SKY }] }
         : { canvas: [
           { type: "line", x1: 32, y1: 58, x2: PAGE_W - 32, y2: 58, lineWidth: 0.75, lineColor: SKY },
           { type: "polyline", closePath: true, points: [{ x: 0, y: PAGE_H - 26 }, { x: PAGE_W * 0.83, y: PAGE_H - 26 }, { x: PAGE_W * 0.86, y: PAGE_H }, { x: 0, y: PAGE_H }], color: NAVY }] },
@@ -573,5 +608,24 @@
     };
   }
 
-  root.SpecCore = { importWorkbook, workbookImages, diff, applyOps, buildPdf, formatNumber, newId, setLayoutDefaults };
+  /** Which illustration fits this aircraft: cover.illustration overrides ("none" hides it), else detected from model/type. */
+  function aircraftKey(spec) {
+    const c = (spec && spec.cover) || {};
+    if (c.illustration && c.illustration !== "auto") return c.illustration === "none" ? null : c.illustration;
+    let type = "";
+    for (const s of (spec && spec.sections) || []) if (s.type === "kv") for (const r of s.rows) if ((r.label || "").toUpperCase() === "AIRCRAFT TYPE") type = r.value || "";
+    const match = (t) => {
+      t = t.toUpperCase();
+      if (/ATR\s*-?\s*72|\b72-[12]\d\d/.test(t)) return "atr72";
+      if (/ATR\s*-?\s*42|\b42-[35]\d\d/.test(t)) return "atr42";
+      if (/DHC\s*-?\s*6|TWIN\s*OTTER/.test(t)) return "dhc6";
+      if (/1900|BEECH|B190/.test(t)) return "b1900";
+      if (/ERJ|EMB\s*-?\s*1[34][05]|\bE1[34]5/.test(t)) return "erj145";
+      return null;
+    };
+    return match(c.model || "") || match(type); // the cover model wins over the sheet's type code
+  }
+  const AIRCRAFT_TYPES = [["atr72", "ATR 72"], ["atr42", "ATR 42"], ["dhc6", "DHC-6 Twin Otter"], ["b1900", "Beechcraft 1900"], ["erj145", "Embraer ERJ 145"]];
+
+  root.SpecCore = { aircraftKey, AIRCRAFT_TYPES, importWorkbook, workbookImages, diff, applyOps, buildPdf, formatNumber, newId, setLayoutDefaults };
 })(typeof window !== "undefined" ? window : globalThis);
