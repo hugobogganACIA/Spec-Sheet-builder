@@ -62,12 +62,44 @@
   }
   function warningsBox(w) {
     if (!w || !w.length) return null;
-    return h("div", { class: "warn" }, h("strong", {}, `Check ${w.length} item${w.length > 1 ? "s" : ""} in the source file before sending this out:`),
+    return h("div", { class: "warnbox" }, h("strong", {}, `Check ${w.length} item${w.length > 1 ? "s" : ""} in the source file before sending this out:`),
       h("ul", {}, w.slice(0, 30).map((x) => h("li", {}, x))), w.length > 30 ? h("div", {}, `…and ${w.length - 30} more`) : null);
   }
   function pickFile(accept, cb) {
     const inp = h("input", { type: "file", accept, style: "position:fixed;left:-999px", onchange: () => { const f = inp.files[0]; inp.remove(); if (f) cb(f); } });
     document.body.append(inp); inp.click();
+  }
+
+  // ------------------------------------------------------------ page parts, in ACIA Commercial's pattern
+  /** The navy cover: crumbs [text | [text, hash]], title, sub (under the title), lede, actions, side (a glance card). */
+  function coverEl({ crumbs, title, sub, badge, lede, actions, side, compact }) {
+    const cr = (crumbs || []).flatMap((c, i) => [i ? h("span", { "aria-hidden": "true" }, "·") : null,
+      Array.isArray(c) ? h("button", { class: "crumb", onclick: () => (location.hash = c[1]) }, c[0]) : h("span", {}, c)]);
+    return h("section", { class: "cover" + (compact ? " compact" : "") }, h("div", { class: "shell" + (side ? " cover-grid" : "") },
+      h("div", {}, cr.length ? h("p", { class: "eyebrow-line" }, cr) : null,
+        h("h1", {}, title, badge || null, sub ? h("span", { class: "t-sub" }, sub) : null),
+        lede ? h("p", { class: "lede" }, lede) : null,
+        actions && actions.length ? h("div", { class: "cover-actions" }, actions) : null),
+      side || null));
+  }
+  /** A glance card for the cover's side: rows [{l, s, v, vs, tone, onClick}]. */
+  function glance(title, rows, empty) {
+    return h("aside", { class: "side" }, h("div", { class: "side-h" }, title),
+      rows.length ? rows.map((r) => h("button", { class: "side-row", onclick: r.onClick || null },
+        h("span", {}, r.l, r.s ? h("small", {}, r.s) : null), h("b", { class: r.tone || "" }, r.v, r.vs ? h("small", {}, r.vs) : null)))
+        : h("p", { class: "side-empty" }, empty || "Nothing yet."));
+  }
+  /** The strip of figures riding the cover's lower edge: [{l, v, s, tone, bar: 0..1}]. */
+  function kpiStrip(list) {
+    return h("div", { class: "shell" }, h("div", { class: "kpis", style: `--n:${list.length}` }, list.map((k) =>
+      h("div", { class: "kpi" + (k.tone ? " " + k.tone : "") }, h("span", { class: "l" }, k.l), h("span", { class: "v" }, k.v), h("span", { class: "s" }, k.s || "\u00a0"),
+        k.bar !== undefined ? h("span", { class: "kbar" + (k.tone ? " " + k.tone : "") }, h("i", { style: `width:${Math.round(Math.max(0, Math.min(1, k.bar)) * 100)}%` })) : null))));
+  }
+  /** A section: eyebrow, heading, a line under it, an optional control on the right, then its body. */
+  function secEl({ eyebrow, title, lede, right, id }, ...body) {
+    return h("section", { class: "psec", id: id || null }, h("div", { class: "shell" },
+      h("div", { class: "psec-head" }, h("div", {}, eyebrow ? h("span", { class: "eyebrow" }, eyebrow) : null, h("h2", {}, title), lede ? h("p", {}, lede) : null), right || null),
+      body));
   }
 
   // ------------------------------------------------------------ platform capabilities
@@ -142,11 +174,41 @@
 
   // ------------------------------------------------------------ fleet
   function renderFleet() {
+    const stale = settings.stale_days || 90;
+    const age = (a) => window.SpecChecks.dataAgeDays(a.info_date);
+    const aircraft = fleet.filter((a) => a.kind !== "engine"), engines = fleet.filter((a) => a.kind === "engine");
+    const old = fleet.filter((a) => { const d = age(a); return d !== null && d > stale; });
+    const month = fleet.filter((a) => a.updated_at && Date.now() - new Date(a.updated_at) < 30 * 86400000);
+    const idLabel = (a) => `${a.kind === "engine" ? "ESN" : "MSN"} ${a.msn}`;
+    const upload = () => pickFile(ACCEPT, (f) => importExcel(f));
+
+    const title = !fleet.length ? "Spec sheets, ready to send"
+      : old.length ? `${old.length} of ${fleet.length} spec sheet${fleet.length > 1 ? "s" : ""} need${old.length === 1 ? "s" : ""} fresh data`
+      : `${fleet.length} spec sheet${fleet.length > 1 ? "s" : ""}, all current`;
+    const byAge = [...fleet].sort((a, b) => (age(b) ?? -1) - (age(a) ?? -1)).slice(0, 5);
+    const side = glance("Data age, oldest first", byAge.map((a) => {
+      const d = age(a);
+      return { l: idLabel(a), s: [a.model, a.registration].filter(Boolean).join(" · "), v: d === null ? "–" : `${d} days`, vs: a.info_date || "no date",
+               tone: d !== null && d > stale ? "warn" : "good", onClick: () => (location.hash = "#ac-" + a.id) };
+    }), "Upload a spec sheet to see how current each one is.");
+    const cover = coverEl({ crumbs: ["Spec sheets"], title,
+      lede: "Upload an aircraft or engine spec in any format: Excel, PDF, Word or a scan. Each one is checked, kept with every version, and downloaded as the ACIA spec sheet PDF.",
+      actions: [canWrite && cap.db ? h("button", { class: "btn light", onclick: upload }, "Upload spec sheet") : null,
+        h("button", { class: "btn glass", onclick: () => (location.hash = "#prefs") }, "Settings")].filter(Boolean),
+      side });
+    const kpis = kpiStrip([
+      { l: "Aircraft", v: String(aircraft.length), s: "spec sheets" },
+      { l: "Engines", v: String(engines.length), s: "spec sheets" },
+      { l: "Current", v: String(fleet.length - old.length), s: `data under ${stale} days old`, tone: "good", bar: fleet.length ? (fleet.length - old.length) / fleet.length : 0 },
+      { l: "Need fresh data", v: String(old.length), s: `over ${stale} days old`, tone: old.length ? "warn" : "", bar: fleet.length ? old.length / fleet.length : 0 },
+      { l: "Updated", v: String(month.length), s: "in the last 30 days" },
+    ]);
+
     const drop = h("div", { class: "drop" },
-      h("div", { class: "glyph", "aria-hidden": "true" }, "XLS PDF DOC"),
+      h("div", { class: "glyph", "aria-hidden": "true" }, "XLS", h("br"), "PDF"),
       h("div", { class: "grow" }, h("strong", {}, "Drop a spec sheet here"),
-        h("div", { class: "small muted" }, "Excel, PDF (including scans), Word, CSV or a photo, for aircraft or engines, in any layout. A new MSN or ESN creates a spec sheet; one already in the fleet gets a new version, and you'll see every value that changed.")),
-      h("button", { class: "btn primary", disabled: !cap.db || !canWrite, onclick: () => pickFile(ACCEPT, (f) => importExcel(f)) }, "Upload spec sheet"));
+        h("div", { class: "small muted" }, "Excel, PDF (including scans), Word, CSV or a photo, in any layout. A new MSN or ESN creates a spec sheet; one already here gets a new version, and you'll see every value that changed.")),
+      h("button", { class: "btn primary", disabled: !cap.db || !canWrite, onclick: upload }, "Upload spec sheet"));
     if (cap.db && canWrite) {
       drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("over"); });
       drop.addEventListener("dragleave", () => drop.classList.remove("over"));
@@ -155,22 +217,22 @@
     let list;
     if (!fleetLoaded && !fleetError) list = h("div", { class: "panel empty" }, h("span", { class: "spin" }), " Loading spec sheets…");
     else if (fleetError && !fleet.length) list = h("div", { class: "panel empty" }, fleetError);
-    else if (!fleet.length) list = h("div", { class: "panel empty" }, h("h2", {}, "No spec sheets yet"), h("p", {}, "Upload the Excel tech spec for an aircraft to create its first spec sheet."));
-    else list = h("div", { class: "fleet" }, fleet.map((a) => h("button", { class: "tail", onclick: () => (location.hash = "#ac-" + a.id) },
-      h("div", { class: "top" }, h("span", { class: "msn feature-name" }, a.kind === "engine" ? h("span", { style: "font-size:13px;opacity:.75" }, "ESN ") : null, a.msn), h("span", { class: "model" }, a.model || ""), a.registration ? h("span", { class: "reg" }, a.registration) : null),
-      h("dl", {},
-        h("dt", {}, "Info date"), h("dd", {}, a.info_date || "–", (() => {
-          const days = window.SpecChecks.dataAgeDays(a.info_date);
-          return days !== null && days > (settings.stale_days || 90) ? h("span", { class: "chip stale", title: "Hours, cycles and remaining figures will have moved on" }, ` ${days} days old`) : null;
-        })()),
-        h("dt", {}, "Version"), h("dd", {}, `v${a.version || 1}`),
-        h("dt", {}, "Updated"), h("dd", {}, when(a.updated_at)),
-        h("dt", {}, "Last change"), h("dd", {}, a.last_change || "")))));
-    $view.replaceChildren(
-      h("div", { class: "fleet-head" }, h("div", { class: "grow" }, h("h1", {}, "Fleet spec sheets"),
-        h("div", { class: "muted" }, `${fleet.filter((a) => a.kind !== "engine").length} aircraft · ${fleet.filter((a) => a.kind === "engine").length} engines · PDF in the ACIA layout, generated from the latest saved version`)),
-        !canWrite ? h("span", { class: "chip" }, "View only") : null),
-      drop, list);
+    else if (!fleet.length) list = h("div", { class: "panel empty" }, h("h2", {}, "No spec sheets yet"), h("p", {}, "Upload a spec sheet for an aircraft or an engine to create the first one."));
+    else list = h("div", { class: "fleet" }, fleet.map((a) => {
+      const d = age(a);
+      return h("button", { class: "tail", onclick: () => (location.hash = "#ac-" + a.id) },
+        h("div", { class: "top" }, h("span", {}, h("span", { class: "kind" }, a.kind === "engine" ? "ESN " : "MSN "), h("span", { class: "msn" }, a.msn)),
+          h("span", { class: "model" }, a.model || ""), a.registration ? h("span", { class: "pill acc reg" }, a.registration) : null),
+        h("dl", {},
+          h("dt", {}, "Information date"), h("dd", {}, a.info_date || "–", " ", d !== null && d > stale ? h("span", { class: "pill warn" }, `${d} days old`) : d !== null ? h("span", { class: "pill good" }, "current") : null),
+          h("dt", {}, "Version"), h("dd", {}, `v${a.version || 1}`),
+          h("dt", {}, "Updated"), h("dd", {}, when(a.updated_at)),
+          h("dt", {}, "Last change"), h("dd", {}, a.last_change || "")));
+    }));
+    $view.replaceChildren(cover, kpis,
+      secEl({ eyebrow: "The fleet", title: fleet.length ? "Every spec sheet" : "Start with a spec sheet",
+              lede: "Open one to edit it, run the checks before sending and download its PDF.", right: !canWrite ? h("span", { class: "pill" }, "View only") : null },
+        canWrite ? drop : null, list));
   }
 
   // ------------------------------------------------------------ Excel import
@@ -234,7 +296,7 @@
           method === "claude" ? h("p", { class: "small muted" }, source === "images"
             ? "Claude read the page images into the standard layout."
             : "This file isn't in the usual Excel template, so Claude read it into the standard layout. Every value was checked against the file's text.") : null,
-          checks && checks.length ? h("div", { class: "warn" }, h("strong", {}, `${checks.length} value${checks.length > 1 ? "s" : ""} Claude returned couldn't be found in the file. Check them before sending the PDF out:`),
+          checks && checks.length ? h("div", { class: "warnbox" }, h("strong", {}, `${checks.length} value${checks.length > 1 ? "s" : ""} Claude returned couldn't be found in the file. Check them before sending the PDF out:`),
             h("ul", {}, checks.slice(0, 30).map((x) => h("li", {}, x)))) : null,
           warningsBox(warnings), prevSpec ? changesTable(changes) : null),
         [{ label: "Open spec sheet", cls: "primary", run: () => { if (ws && ws.id === id) openAircraft(id, true); else location.hash = "#ac-" + id; } }]);
@@ -412,7 +474,7 @@
   function markDirty() {
     if (!ws) return;
     ws.dirty = true;
-    const c = document.getElementById("state-chip"); if (c) { c.className = "chip dirty"; c.textContent = "Unsaved"; }
+    const c = document.getElementById("state-chip"); if (c) { c.className = "pill on-dark warn"; c.textContent = "Unsaved"; }
     for (const id of ["save-btn", "discard-btn"]) { const b = document.getElementById(id); if (b) b.disabled = false; }
     schedulePreview();
     clearTimeout(checksTimer);
@@ -450,28 +512,44 @@
     const s = ws.spec; const c = s.cover;
     const reg = kvValue(s, "AIRCRAFT REGISTRATION");
     const ro = !canWrite;
-    const head = h("div", { class: "ws-head" },
-      h("div", { class: "title" }, h("h1", {}, h("span", { class: "feature-name", style: "color:inherit;font-size:inherit" }, `${c.kind === "engine" ? "ESN" : "MSN"} ${c.msn || "?"}`), " ", h("span", {}, `${c.model || ""}${reg ? " · " + reg : ""}`)),
-        h("div", { class: "row small muted" }, `Version ${ws.version}`, s.source && s.source.filename ? ` · from ${s.source.filename}` : "",
-          h("span", { id: "state-chip", class: ws.dirty ? "chip dirty" : "chip ok" }, ws.dirty ? "Unsaved" : "Saved"))),
-      ro ? h("span", { class: "chip" }, "View only") : null,
-      ro ? null : h("button", { class: "btn primary", id: "save-btn", disabled: !ws.dirty, onclick: () => save() }, "Save"),
-      ro ? null : h("button", { class: "btn", id: "discard-btn", disabled: !ws.dirty, onclick: async () => {
-        if (await confirmDialog("Discard changes?", "Your unsaved edits to this spec sheet will be dropped.", "Discard", "danger")) { ws.spec = clone(ws.saved); ws.dirty = false; ws.highlight.clear(); renderWorkspace(); schedulePreview(0); } } }, "Discard"),
-      ro ? null : h("button", { class: "btn", onclick: () => pickFile(ACCEPT, async (f) => {
-        if (!ws.dirty || await confirmDialog("Replace unsaved edits?", "Uploading a file saves its data as a new version. Your unsaved edits will be dropped.", "Upload")) { ws.dirty = false; importExcel(f, ws.id); } }) }, "Update from file"),
-      h("button", { class: "btn", onclick: showHistory }, "History"),
-      h("button", { class: "btn sky", onclick: downloadPdf }, "Download PDF"),
-      ro ? null : h("button", { class: "btn ghost", "aria-label": "More actions", onclick: moreActions }, "•••"));
+    const isEng = c.kind === "engine";
+    const issues = runChecks(s);
+    const n = (lvl) => issues.filter((x) => x.level === lvl).length;
+    const ageD = window.SpecChecks.dataAgeDays(kvValue(s, "INFORMATION DATE"));
+    const toChecks = () => { const el = document.getElementById("checks"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); };
+    const side = glance("Before you send it", [
+      { l: "To fix", s: "Excel errors, overdue items", v: String(n("error")), tone: n("error") ? "crit" : "good", onClick: toChecks },
+      { l: "To check", s: "recalculated figures, empty fields", v: String(n("warn")), tone: n("warn") ? "warn" : "good", onClick: toChecks },
+      { l: "Data age", s: kvValue(s, "INFORMATION DATE") || "no information date", v: ageD === null ? "–" : `${ageD} days`, tone: ageD !== null && ageD > (settings.stale_days || 90) ? "warn" : "good", onClick: toChecks },
+      { l: "Version", s: s.source && s.source.filename ? (s.source.filename.length > 38 ? s.source.filename.slice(0, 36) + "…" : s.source.filename) : "", v: `v${ws.version}`, onClick: showHistory },
+    ]);
+    const discard = async () => {
+      if (await confirmDialog("Discard changes?", "Your unsaved edits to this spec sheet will be dropped.", "Discard", "danger")) { ws.spec = clone(ws.saved); ws.dirty = false; ws.highlight.clear(); renderWorkspace(); schedulePreview(0); } };
+    const head = coverEl({
+      crumbs: [["Spec sheets", "#fleet"], `${isEng ? "ESN" : "MSN"} ${c.msn || "?"}`],
+      title: `${isEng ? "ESN" : "MSN"} ${c.msn || "?"}`,
+      badge: h("span", { id: "state-chip", class: ws.dirty ? "pill on-dark warn" : "pill on-dark" }, ws.dirty ? "Unsaved" : "Saved"),
+      sub: [c.model, reg].filter(Boolean).join(" · "),
+      lede: `Edit any value, ask Claude for a change, then run the checks and download the PDF. Nothing is saved until you press Save.${ro ? " You can view this spec sheet but not change it." : ""}`,
+      actions: [
+        ro ? null : h("button", { class: "btn light", id: "save-btn", disabled: !ws.dirty, onclick: () => save() }, "Save"),
+        h("button", { class: ro ? "btn light" : "btn glass", onclick: downloadPdf }, "Download PDF"),
+        ro ? null : h("button", { class: "btn glass", onclick: () => pickFile(ACCEPT, async (f) => {
+          if (!ws.dirty || await confirmDialog("Replace unsaved edits?", "Uploading a file saves its data as a new version. Your unsaved edits will be dropped.", "Upload")) { ws.dirty = false; importExcel(f, ws.id); } }) }, "Update from file"),
+        h("button", { class: "btn glass", onclick: showHistory }, "History"),
+        ro ? null : h("button", { class: "btn glass", id: "discard-btn", disabled: !ws.dirty, onclick: discard }, "Discard"),
+        ro ? null : h("button", { class: "btn glass", "aria-label": "More actions", onclick: moreActions }, "•••"),
+      ].filter(Boolean),
+      side, compact: true });
 
     const editor = h("div", { class: "editor" }, ro ? null : askBox(), h("div", { id: "checks" }, checksPanel(ro)), coverPanel(ro), s.sections.map((sec, i) => sectionPanel(sec, i, ro)), ro ? null : addBar(), attachmentsPanel(ro));
     const preview = h("div", { class: "preview" },
       h("div", { class: "bar" }, h("h2", {}, "PDF preview"), h("span", { id: "pv-state", class: "small muted" }), h("span", { class: "grow" }),
         h("button", { class: "btn ghost", onclick: () => { ws.showPreview = false; renderWorkspace(); } }, "Hide")),
       h("div", { class: "pages", id: "pages" }));
-    $view.replaceChildren(...[head, newerBanner(),
+    $view.replaceChildren(head, h("div", { class: "shell", style: "padding-top:22px" }, newerBanner(),
       ws.showPreview ? null : h("p", {}, h("button", { class: "btn", onclick: () => { ws.showPreview = true; renderWorkspace(); schedulePreview(0); } }, "Show PDF preview")),
-      h("div", { class: "ws" + (ws.showPreview ? "" : " nopreview") }, editor, preview)].filter(Boolean));
+      h("div", { class: "ws" + (ws.showPreview ? "" : " nopreview") }, editor, preview)));
     if (ws.showPreview && lastPreview.canvases) document.getElementById("pages").replaceChildren(...lastPreview.canvases);
   }
 
@@ -893,8 +971,12 @@ Answer with JSON only: {"summary": "one or two sentences", "ops": [{"op": "...",
         h("button", { class: "btn ghost", "aria-label": "Remove contact", onclick: () => { s.contacts.splice(i, 1); draw(); } }, "✕")))),
       ro ? "" : h("button", { class: "btn", onclick: () => { s.contacts.push({ name: "", title: "", email: "", phone: "" }); draw(); } }, "+ Contact"));
     s.contacts = s.contacts || []; draw();
-    $view.replaceChildren(h("div", { class: "fleet-head" }, h("div", { class: "grow" }, h("h1", {}, "Settings"), h("div", { class: "muted" }, "Used on every spec sheet PDF."))),
-      h("div", { class: "editor" },
+    const saveBtn = ro ? null : h("button", { class: "btn light", onclick: async () => {
+      try { await cap.db.doc("config/settings").set(s); toast("Settings saved. Every PDF uses them from now on."); } catch (e) { toast("Couldn't save settings: " + (e.message || e.code), true); } } }, "Save settings");
+    $view.replaceChildren(coverEl({ crumbs: [["Spec sheets", "#fleet"], "Settings"], title: "Settings",
+        lede: "The cover contacts, disclaimer, header and footer used on every spec sheet PDF, and when data counts as out of date.",
+        actions: [saveBtn, h("button", { class: "btn glass", onclick: () => (location.hash = "#fleet") }, "Back to spec sheets")].filter(Boolean), compact: true }),
+      h("div", { class: "shell editor", style: "padding-top:22px" },
         h("div", { class: "panel pad" }, h("h2", { style: "margin-bottom:10px" }, "Header and footer"),
           h("div", { class: "grid2" }, f("Company name", "company"), f("Document title", "doc_title"), f("Confidentiality line", "confidential"), f("Contacts heading on the cover", "contacts_heading"),
             (() => { const id = fid("st"); return h("div", { class: "field" }, h("label", { for: id }, "Flag data older than (days)"),
