@@ -1,0 +1,49 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+{% include "_fonts.html" %}
+<style>
+  @page { size: {{ page_w }}pt {{ page_h }}pt; margin: 0; }
+  .page { position: relative; width: {{ page_w }}pt; height: {{ page_h }}pt; overflow: hidden; background: var(--sky); }
+  .navy { position: absolute; inset: 0; background: var(--navy);
+          clip-path: polygon(0 0, 100% 0, 100% 58%, 0 62.5%); }
+  .logo { position: absolute; top: 52pt; left: 0; right: 0; text-align: center; }
+  .logo img { width: 200pt; }
+  .facts { position: absolute; top: 222pt; left: 46pt; right: 46pt; }
+  .fact { display: flex; gap: 8pt; margin-bottom: 10pt; height: 20pt; }
+  .fact .k, .fact .v { display: flex; align-items: center; justify-content: center;
+          transform: skewX(-14deg); font-size: 9.5pt; }
+  .fact .k { flex: 0 0 160pt; background: var(--sky); color: #fff; letter-spacing: .2pt; }
+  .fact .v { flex: 1; background: #fff; color: var(--navy); font-weight: 700; }
+  .fact span { transform: skewX(14deg); }
+  .contacts { position: absolute; top: 498pt; left: 30pt; right: 30pt; text-align: center; color: #fff; font-size: 8.6pt; line-height: 1.32; }
+  .contacts h3 { font-style: italic; font-weight: 700; font-size: 10pt; margin: 0 0 14pt; }
+  .person b { color: var(--navy); font-size: 9pt; }
+  .person a { color: #fff; text-decoration: underline; }
+  .row { display: flex; justify-content: space-around; margin-top: 14pt; }
+  .row .person { flex: 1; }
+  .disclaimer { position: absolute; bottom: 22pt; left: 40pt; right: 40pt; text-align: center;
+                font-size: 5.2pt; font-style: italic; color: var(--navy); line-height: 1.35; }
+</style></head>
+<body><div class="page">
+  <div class="navy"></div>
+  <div class="logo"><img src="{{ static }}/img/logo_white.png" alt="ACIA Aero Leasing"></div>
+  <div class="facts">
+    <div class="fact"><div class="k"><span>AIRCRAFT MODEL</span></div><div class="v"><span>{{ cover.model }}</span></div></div>
+    <div class="fact"><div class="k"><span>AIRCRAFT MSN</span></div><div class="v"><span>{{ cover.msn }}</span></div></div>
+    <div class="fact"><div class="k"><span>YEAR OF MANUFACTURE</span></div><div class="v"><span>{{ cover.year }}</span></div></div>
+  </div>
+  <div class="contacts">
+    <h3>{{ settings.contacts_heading }}</h3>
+    {% set contacts = settings.contacts %}
+    {% if contacts %}
+      {% set lead = contacts[0] %}
+      <div class="person"><b>{{ lead.name }}</b><br>{{ lead.title }}<br><a>{{ lead.email }}</a><br>{{ lead.phone }}</div>
+      {% for chunk in contacts[1:] | batch(2) %}
+      <div class="row">
+        {% for c in chunk %}<div class="person"><b>{{ c.name }}</b><br>{{ c.title }}<br><a>{{ c.email }}</a><br>{{ c.phone }}</div>{% endfor %}
+      </div>
+      {% endfor %}
+    {% endif %}
+  </div>
+  <div class="disclaimer">{{ settings.disclaimer }}</div>
+</div></body></html>

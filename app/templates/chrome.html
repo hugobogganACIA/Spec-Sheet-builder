@@ -1,0 +1,34 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+{% include "_fonts.html" %}
+<style>
+  @page { size: {{ page_w }}pt {{ page_h }}pt; margin: 0; }
+  .page { position: relative; width: {{ page_w }}pt; height: {{ page_h }}pt; overflow: hidden; page-break-after: always; }
+  .page:last-child { page-break-after: auto; }
+  .hdr { position: absolute; top: 24pt; left: 32pt; right: 32pt; height: 34pt; border-bottom: 0.75pt solid var(--sky); }
+  .hdr .conf { font-size: 5.6pt; letter-spacing: .2pt; color: var(--ink); }
+  .hdr .title { margin-top: 2pt; font-size: 9.5pt; color: var(--navy); }
+  .hdr .title b { font-weight: 700; }
+  .hdr img { position: absolute; right: 0; top: -2pt; width: 92pt; }
+  .ftr { position: absolute; left: 0; right: 0; bottom: 0; height: 26pt; }
+  .ftr .bar { position: absolute; left: 0; bottom: 0; height: 26pt; width: 86%; background: var(--navy);
+              clip-path: polygon(0 0, 96% 0, 100% 100%, 0 100%); }
+  .ftr .bar span { position: absolute; left: 32pt; top: 8.5pt; color: #fff; font-size: 7.2pt; }
+  .ftr .bar b { font-weight: 700; }
+  .ftr .num { position: absolute; right: 32pt; bottom: 8.5pt; color: var(--navy); font-size: 7.2pt; font-weight: 600; }
+</style></head>
+<body>
+{% for n in pages %}
+<div class="page">
+  <div class="hdr">
+    <div class="conf">{{ settings.confidential }}</div>
+    <div class="title"><b>{{ settings.company }}</b> &ndash; {{ settings.doc_title }}</div>
+    <img src="{{ static }}/img/logo_color.png" alt="">
+  </div>
+  <div class="ftr">
+    <div class="bar"><span><b>{{ settings.company }}</b> | MSN {{ cover.msn }}</span></div>
+    <div class="num">{{ n }}</div>
+  </div>
+</div>
+{% endfor %}
+</body></html>

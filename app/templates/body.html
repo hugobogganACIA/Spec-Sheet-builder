@@ -1,0 +1,86 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+{% include "_fonts.html" %}
+<style>
+  @page { size: {{ page_w }}pt {{ page_h }}pt; margin: 74pt 32pt 46pt 32pt; }
+  body { font-size: 7.4pt; line-height: 1.25; }
+  .section { margin: 0 0 13pt; break-inside: avoid; }
+  .section.long { break-inside: auto; }
+  .page-break { break-before: page; }
+  h2 { color: var(--navy); font-size: 12.5pt; font-weight: 700; letter-spacing: .2pt; margin: 4pt 0 6pt;
+       padding-bottom: 2pt; border-bottom: 1.2pt solid var(--navy); break-after: avoid; }
+  h3 { color: var(--navy); font-size: 9pt; font-weight: 700; margin: 0 0 4pt; text-transform: uppercase; }
+  table { width: 100%; border-collapse: collapse; }
+  td, th { padding: 2.6pt 4pt; vertical-align: middle; }
+  tbody tr:nth-child(odd) td { background: var(--stripe); }
+  .kv td.k { width: 40%; font-weight: 700; color: var(--ink); }
+  .kv td.v { color: var(--ink); }
+  .grid th { font-weight: 700; color: var(--navy); text-align: center; border-bottom: 0.9pt solid var(--navy); }
+  .grid th.lh { text-align: left; }
+  .grid tr.groups th { border-bottom: 0.6pt solid var(--rule); font-size: 7.6pt; }
+  .grid tr.groups th.blank { border-bottom: none; }
+  .grid td { text-align: center; }
+  .grid td.l { text-align: left; font-weight: 600; }
+  .grid.wide td, .grid.wide th { padding: 2.2pt 2.6pt; }
+  .grid.avionics td, .grid.avionics th { font-size: 6.6pt; text-align: left; }
+  .grid.avionics td.l { font-weight: 400; text-align: center; width: 28pt; }
+  .grid.avionics th.lh { text-align: center; }
+  .grid thead { display: table-header-group; }
+  .grid tr { break-inside: avoid; }
+  .list p { margin: 0 0 2.5pt; }
+  .list p.b { font-weight: 700; color: var(--navy); margin-top: 6pt; }
+  .list p.b:first-child { margin-top: 0; }
+  .att { break-before: page; }
+  .att img { display: block; max-width: 100%; max-height: 600pt; margin: 8pt auto 0; object-fit: contain; }
+</style></head>
+<body>
+{% for s in spec.sections if not s.hidden %}
+  {% set brk = ' page-break' if s.page_break_before and not loop.first else '' %}
+  {% if s.type == 'heading' %}
+    <h2 class="{{ brk }}">{{ s.title }}</h2>
+  {% elif s.type == 'kv' %}
+    <div class="section{{ brk }}">
+      {% if s.title %}<h2>{{ s.title|upper }}</h2>{% endif %}
+      <table class="kv"><tbody>
+        {% for r in s.rows %}<tr><td class="k">{{ r.label }}</td><td class="v">{{ r.value }}</td></tr>{% endfor %}
+      </tbody></table>
+    </div>
+  {% elif s.type == 'grid' %}
+    {% set is_av = 'AVIONIC' in (s.title or '')|upper %}
+    {% set ncols = s.columns|length %}
+    <div class="section{{ brk }}{% if s.rows|length > 18 %} long{% endif %}">
+      {% if is_av %}<h2>{{ s.title|upper }}</h2>{% endif %}
+      <table class="grid{% if ncols >= 5 %} wide{% endif %}{% if is_av %} avionics{% endif %}">
+        <thead>
+          {% if s.groups %}
+          <tr class="groups">
+            <th class="lh blank">{% if not is_av %}{{ s.title }}{% endif %}</th>
+            {% for g in s.groups %}<th colspan="{{ g.span }}" class="{{ '' if g.label else 'blank' }}">{{ g.label }}</th>{% endfor %}
+          </tr>
+          {% endif %}
+          <tr>
+            <th class="lh">{% if is_av %}{{ s.label_header }}{% elif not s.groups %}{{ s.title or s.label_header }}{% else %}{{ s.label_header }}{% endif %}</th>
+            {% for c in s.columns %}<th>{{ c }}</th>{% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in s.rows %}
+          <tr><td class="l">{{ r.label }}</td>{% for c in r.cells %}<td>{{ c }}</td>{% endfor %}</tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% elif s.type == 'list' %}
+    <div class="section list{{ brk }}">
+      {% if s.title %}<h3>{{ s.title }}</h3>{% endif %}
+      {% for it in s['items'] %}<p class="{{ 'b' if it.bold else '' }}">{{ it.text }}</p>{% endfor %}
+    </div>
+  {% endif %}
+{% endfor %}
+{% for a in image_attachments %}
+  <div class="att">
+    {% if a.title %}<h2>{{ a.title|upper }}</h2>{% endif %}
+    <img src="{{ a.src }}" alt="">
+  </div>
+{% endfor %}
+</body></html>

@@ -1,0 +1,11 @@
+services:
+  spec-builder:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      # Optional: enables "Ask for a change". Leave unset to switch AI edits off.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
