@@ -680,16 +680,30 @@ Answer with JSON only: {"summary": "one or two sentences", "ops": [{"op": "...",
     }
   }
 
+  async function pageCount(bytes) {
+    try { const doc = await window.pdfjsLib.getDocument({ data: bytes.slice() }).promise; const n = doc.numPages; doc.destroy(); return n; }
+    catch (_) { return 0; }
+  }
+
   async function makePdf(spec) {
     const images = {};
     for (const a of spec.attachments || []) if (!a.hidden && a.asset) { const d = await assetDataUrl(a.asset); if (d) images[a.asset] = d; }
     const font = await pdfFonts();
     const key = C.aircraftKey(spec), eng = C.engineKey(spec);
-    const dd = C.buildPdf(spec, settings, { logoWhite: A.logoWhite, logoColor: A.logoColor, images, fontName: font.name,
-                                            aircraft: key ? A.aircraft[key] : null, engine: spec.cover.kind === "engine" && eng ? A.engines[eng] : null });
-    return await new Promise((res, rej) => {
-      try { window.pdfMake.createPdf(dd, null, font.fonts, font.vfs).getBuffer((buf) => res(new Uint8Array(buf))); } catch (e) { rej(e); }
+    const assetsFor = { logoWhite: A.logoWhite, logoColor: A.logoColor, images, fontName: font.name,
+                        aircraft: key ? A.aircraft[key] : null, engine: spec.cover.kind === "engine" && eng ? A.engines[eng] : null };
+    const dd = C.buildPdf(spec, settings, assetsFor);
+    const render = (def) => new Promise((res, rej) => {
+      try { window.pdfMake.createPdf(def, null, font.fonts, font.vfs).getBuffer((buf) => res(new Uint8Array(buf))); } catch (e) { rej(e); }
     });
+    let bytes = await render(dd);
+    // Engine spec sheets are two pages: the cover plus one page. Tighten spacing (and drop empty fields) until it fits.
+    if (spec.cover.kind === "engine") {
+      for (let level = 1; level <= 4 && (await pageCount(bytes)) > 2; level++) {
+        bytes = await render(C.buildPdf(spec, settings, { ...assetsFor, compact: level }));
+      }
+    }
+    return bytes;
   }
 
   const pdfName = (spec) => `MSN ${spec.cover.msn || ""} Spec - ${new Date().toLocaleDateString("en-GB", { month: "short", year: "2-digit" })}.pdf`.replace(/[^\w .\-]/g, "");

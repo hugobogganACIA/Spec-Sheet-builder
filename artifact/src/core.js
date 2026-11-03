@@ -502,31 +502,36 @@
     content.push({ text: "", pageBreak: "after" });
 
     // ---- body
+    // k: compaction level (0 normal .. 4 tightest); used to keep an engine spec sheet to one page after the cover.
+    const k = assets.compact || 0;
+    const isEngineSheet = cover.kind === "engine";
+    const pad = Math.max(0.8, 2.4 - 0.4 * k), gap = Math.max(5, 12 - 2 * k);
     let first = true;
     const h2 = (t, brk) => ({ stack: [
-      { text: t, font: "Heading", fontSize: 12.5, color: NAVY },
+      { text: t, font: "Heading", fontSize: 12.5 - k, color: NAVY },
       { canvas: [{ type: "line", x1: 0, y1: 2, x2: PAGE_W - 64, y2: 2, lineWidth: 1.2, lineColor: NAVY }] }],
       margin: [0, 4, 0, 6], pageBreak: brk ? "before" : undefined, headlineLevel: 1 });
-    const zebra = { hLineWidth: () => 0, vLineWidth: () => 0, paddingTop: () => 2.4, paddingBottom: () => 2.4,
+    const zebra = { hLineWidth: () => 0, vLineWidth: () => 0, paddingTop: () => pad, paddingBottom: () => pad,
                     paddingLeft: () => 4, paddingRight: () => 4 };
 
     for (const s of spec.sections || []) {
       if (s.hidden) continue;
-      const brk = s.page_break_before && !first;
+      const brk = s.page_break_before && !first && !isEngineSheet;
       first = false;
       if (s.type === "heading") { content.push(h2(s.title || "", brk)); continue; }
       if (s.type === "kv") {
-        const body = (s.rows || []).map((r) => [{ text: r.label, bold: true }, { text: r.value }]);
+        const body = (s.rows || []).filter((r) => !(isEngineSheet && k > 0 && !String(r.value || "").trim()))
+          .map((r) => [{ text: r.label, bold: true }, { text: r.value }]);
         if (!body.length) continue;
         const table = { table: { widths: ["40%", "*"], body }, layout: { ...zebra, fillColor: (i) => (i % 2 === 0 ? STRIPE : null) } };
         content.push({ stack: [s.title ? h2(s.title.toUpperCase()) : null, table].filter(Boolean),
-          margin: [0, 0, 0, 12], pageBreak: brk ? "before" : undefined, unbreakable: body.length < 25 });
+          margin: [0, 0, 0, gap], pageBreak: brk ? "before" : undefined, unbreakable: body.length < 25 });
         continue;
       }
       if (s.type === "list") {
         content.push({ stack: [s.title ? { text: s.title.toUpperCase(), bold: true, color: NAVY, fontSize: 9, margin: [0, 0, 0, 4] } : null,
           ...(s.items || []).map((it, i) => ({ text: it.text, bold: !!it.bold, color: it.bold ? NAVY : INK, margin: [0, it.bold && i ? 6 : 0, 0, 2.5] }))].filter(Boolean),
-          margin: [0, 0, 0, 12], pageBreak: brk ? "before" : undefined });
+          margin: [0, 0, 0, gap], pageBreak: brk ? "before" : undefined });
         continue;
       }
       if (s.type === "grid") content.push(gridTable(s, brk));
@@ -566,25 +571,25 @@
       if (av && n === 6) widths.splice(1, 6, "*", 62, 56, "*", 46, 32);
       const table = {
         table: { headerRows, widths, body, dontBreakRows: true },
-        fontSize: av ? 6.5 : n >= 5 ? 7 : 7.4,
+        fontSize: (av ? 6.5 : n >= 5 ? 7 : 7.4) - 0.45 * k,
         layout: {
           hLineWidth: (i) => (i === headerRows ? 0.9 : headerRows === 2 && i === 1 ? 0.5 : 0),
           hLineColor: (i) => (i === headerRows ? NAVY : RULE),
           vLineWidth: () => 0,
           fillColor: (i) => (i >= headerRows && (i - headerRows) % 2 === 0 ? STRIPE : null),
-          paddingTop: () => 2.4, paddingBottom: () => 2.4,
+          paddingTop: () => pad, paddingBottom: () => pad,
           paddingLeft: () => (n >= 5 ? 2.6 : 4), paddingRight: () => (n >= 5 ? 2.6 : 4),
         },
       };
       return { stack: [av ? h2((s.title || "").toUpperCase()) : null, table].filter(Boolean),
-               margin: [0, 0, 0, 13], pageBreak: brk ? "before" : undefined, unbreakable: s.rows.length <= 18 };
+               margin: [0, 0, 0, gap + 1], pageBreak: brk ? "before" : undefined, unbreakable: s.rows.length <= 18 };
     }
 
     return {
       pageSize: { width: PAGE_W, height: PAGE_H },
       pageMargins: [32, 74, 32, 46],
       info: { title: `MSN ${cover.msn || ""} ${cover.model || ""} - ${settings.doc_title || ""}`, author: settings.company || "" },
-      defaultStyle: { font: assets.fontName || "Archivo", fontSize: 7.4, color: INK, lineHeight: 1.1 },
+      defaultStyle: { font: assets.fontName || "Archivo", fontSize: 7.4 - 0.45 * k, color: INK, lineHeight: 1.1 },
       background: (page) => page === 1 ? { canvas: [
           // masthead with a livery-style diagonal and sky stripe
           { type: "polyline", closePath: true, points: [{ x: 0, y: 0 }, { x: PAGE_W, y: 0 }, { x: PAGE_W, y: 196 }, { x: 0, y: 252 }], color: SKY },

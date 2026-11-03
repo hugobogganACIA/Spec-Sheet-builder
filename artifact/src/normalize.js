@@ -254,10 +254,10 @@
     const grid = (title, label_header, columns, rows, brk) => ({ id: id(), type: "grid", title, label_header, groups: [], columns, rows, page_break_before: !!brk, hidden: false });
     S.push({ id: id(), type: "kv", title: "General Description", page_break_before: false, hidden: false,
              rows: [...ENGINE_GENERAL.map(([k, label]) => ({ label, value: d.general[k] || "" })), ...(d.general_extra || [])] });
+    if (d.llps.length) S.push(grid("LIFE LIMITED PARTS", "", ["Module", "Part No.", "Serial No.", "Limit", "CSN", "Remaining"],
+      d.llps.map((p) => ({ label: p.part, cells: [p.module, p.pn, p.sn, p.limit, p.csn, p.remaining] }))));
     if (d.modules.length) S.push(grid("MODULES", "", ["Serial No.", "TSN", "CSN", "TSO", "CSO"],
       d.modules.map((m) => ({ label: m.name, cells: [m.sn, m.tsn, m.csn, m.tso, m.cso] }))));
-    if (d.llps.length) S.push(grid("LIFE LIMITED PARTS", "", ["Module", "Part No.", "Serial No.", "Limit", "CSN", "Remaining"],
-      d.llps.map((p) => ({ label: p.part, cells: [p.module, p.pn, p.sn, p.limit, p.csn, p.remaining] })), true));
     if (d.shop_visits.length) S.push(grid("SHOP VISIT HISTORY", "DATE", ["MRO", "TSN", "CSN", "Workscope", "Reason"],
       d.shop_visits.map((v) => ({ label: v.date, cells: [v.mro, v.tsn, v.csn, v.workscope, v.reason] }))));
     if (d.options.length) { S.push({ id: id(), type: "heading", title: "NOTES", page_break_before: false, hidden: false });
