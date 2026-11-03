@@ -62,7 +62,7 @@
   }
   function warningsBox(w) {
     if (!w || !w.length) return null;
-    return h("div", { class: "warn" }, h("strong", {}, `Check ${w.length} item${w.length > 1 ? "s" : ""} in the Excel file before sending this out:`),
+    return h("div", { class: "warn" }, h("strong", {}, `Check ${w.length} item${w.length > 1 ? "s" : ""} in the source file before sending this out:`),
       h("ul", {}, w.slice(0, 30).map((x) => h("li", {}, x))), w.length > 30 ? h("div", {}, `…and ${w.length - 30} more`) : null);
   }
   function pickFile(accept, cb) {
@@ -143,10 +143,10 @@
   // ------------------------------------------------------------ fleet
   function renderFleet() {
     const drop = h("div", { class: "drop" },
-      h("div", { class: "glyph", "aria-hidden": "true" }, "XLSX"),
-      h("div", { class: "grow" }, h("strong", {}, "Drop a tech spec workbook here"),
-        h("div", { class: "small muted" }, "Aircraft and engine workbooks in any layout. A new MSN or ESN creates a spec sheet; one already in the fleet gets a new version, and you'll see every value that changed.")),
-      h("button", { class: "btn primary", disabled: !cap.db || !canWrite, onclick: () => pickFile(".xlsx,.xlsm", (f) => importExcel(f)) }, "Upload Excel"));
+      h("div", { class: "glyph", "aria-hidden": "true" }, "XLS PDF DOC"),
+      h("div", { class: "grow" }, h("strong", {}, "Drop a spec sheet here"),
+        h("div", { class: "small muted" }, "Excel, PDF (including scans), Word, CSV or a photo, for aircraft or engines, in any layout. A new MSN or ESN creates a spec sheet; one already in the fleet gets a new version, and you'll see every value that changed.")),
+      h("button", { class: "btn primary", disabled: !cap.db || !canWrite, onclick: () => pickFile(ACCEPT, (f) => importExcel(f)) }, "Upload spec sheet"));
     if (cap.db && canWrite) {
       drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("over"); });
       drop.addEventListener("dragleave", () => drop.classList.remove("over"));
@@ -201,7 +201,7 @@
     let done = busy(`Reading ${file.name}…`);
     try {
       const buf = new Uint8Array(await file.arrayBuffer());
-      const { spec, warnings, checks, method } = await readWorkbook(buf, file.name, (msg) => { done(); done = busy(msg); });
+      const { spec, warnings, checks, method, source } = await readDocument(file, buf, (msg) => { done(); done = busy(msg); });
       const msn = spec.cover.msn;
       const isEngine = spec.cover.kind === "engine";
       const idLabel = isEngine ? "ESN" : "MSN";
@@ -214,7 +214,7 @@
       if (intoId && prevSpec && prevSpec.cover.msn && String(prevSpec.cover.msn) !== String(msn)) warnings.unshift(`This workbook is for ${idLabel} ${msn}, but you uploaded it to ${prevSpec.cover.kind === "engine" ? "ESN" : "MSN"} ${prevSpec.cover.msn}.`);
 
       // Images in the workbook body (LOPA) become extra pages; identical images are reused, not re-uploaded.
-      const imgs = await C.workbookImages(buf).catch(() => []);
+      const imgs = EXCEL.test(file.name) ? await C.workbookImages(buf).catch(() => []) : [];
       const previous = new Map(((prevSpec && prevSpec.attachments) || []).filter((a) => a.hash).map((a) => [a.hash, a]));
       for (const im of imgs) {
         const hash = await sha(im.data);
@@ -230,9 +230,11 @@
       await saveVersion(id, finalSpec, "Excel upload", file.name, sum.exists && !sum.data().archived ? sum.data().version : 0);
       done();
       dialog(prevSpec ? `${idLabel} ${msn} updated` : `${idLabel} ${msn} added`,
-        h("div", {}, h("p", {}, prevSpec ? `Saved as a new version. ${changes.length} value${changes.length === 1 ? "" : "s"} changed since the previous version.` : isEngine ? "A new engine spec sheet was created from the workbook." : "A new spec sheet was created from the workbook."),
-          method === "claude" ? h("p", { class: "small muted" }, "This workbook isn't in the usual template, so Claude read it into the standard layout. Every value was checked against the workbook's cells.") : null,
-          checks && checks.length ? h("div", { class: "warn" }, h("strong", {}, `${checks.length} value${checks.length > 1 ? "s" : ""} Claude returned couldn't be found in the workbook. Check them before sending the PDF out:`),
+        h("div", {}, h("p", {}, prevSpec ? `Saved as a new version. ${changes.length} value${changes.length === 1 ? "" : "s"} changed since the previous version.` : isEngine ? "A new engine spec sheet was created from the file." : "A new spec sheet was created from the file."),
+          method === "claude" ? h("p", { class: "small muted" }, source === "images"
+            ? "Claude read the page images into the standard layout."
+            : "This file isn't in the usual Excel template, so Claude read it into the standard layout. Every value was checked against the file's text.") : null,
+          checks && checks.length ? h("div", { class: "warn" }, h("strong", {}, `${checks.length} value${checks.length > 1 ? "s" : ""} Claude returned couldn't be found in the file. Check them before sending the PDF out:`),
             h("ul", {}, checks.slice(0, 30).map((x) => h("li", {}, x)))) : null,
           warningsBox(warnings), prevSpec ? changesTable(changes) : null),
         [{ label: "Open spec sheet", cls: "primary", run: () => { if (ws && ws.id === id) openAircraft(id, true); else location.hash = "#ac-" + id; } }]);
@@ -244,42 +246,122 @@
    * The usual ACIA template is read directly; any other layout is read by Claude into the same structure,
    * and every value Claude returns is checked against the workbook's cells.
    */
-  async function readWorkbook(buf, filename, status) {
+  const EXCEL = /\.(xlsx|xlsm|xls)$/i, IMAGE = /\.(png|jpe?g|webp|gif)$/i;
+  const ACCEPT = ".xlsx,.xlsm,.xls,.pdf,.docx,.csv,.txt,.png,.jpg,.jpeg,.webp";
+
+  /**
+   * Any spec sheet file -> the standard spec sheet layout.
+   * - The usual ACIA Excel template is read directly.
+   * - Any other Excel layout, PDF, Word, CSV or text file is turned into text and read by Claude;
+   *   every value Claude returns is checked against that text.
+   * - Scanned PDFs and photos/screenshots are sent to Claude as page images (no text to check against).
+   */
+  async function readDocument(file, buf, status) {
     const N = window.SpecNormalize;
-    const parsed = C.importWorkbook(buf, filename);
-    let warnings = parsed.warnings, checks = [], method = "template";
-    let data = N.templateToData(parsed.spec);
-    if (N.coverage(data) < 0.6) {
-      if (!cap.sample) {
-        warnings = ["This workbook isn't in the usual template, and Claude isn't available in this view to read it, so many fields will be empty. Fill them in on the spec sheet, or upload from claude.ai.", ...warnings];
-      } else {
-        status("This workbook has a different layout. Claude is reading it into the standard format…");
-        let limits = null;
-        try { limits = await cap.sample.limits(); } catch (_) {}
-        const maxChars = Math.max(20000, ((limits && limits.maxPromptBytes) || 262144) - 12000);
-        const dump = N.workbookDump(buf, maxChars);
-        const tiers = limits && limits.modelTiers;
-        const tier = !tiers || tiers.includes("complex") ? "complex" : "default";
-        let raw;
-        try { raw = await cap.sample.json(N.extractionPrompt(dump.text, filename), { modelTier: tier }); }
-        catch (e) {
-          if (e && e.code === "not_granted") throw new Error("Claude wasn't allowed to read the workbook. Allow it when asked, or use the usual template.");
-          if (e && e.code === "rate_limited") throw new Error("Claude is busy right now. Try the upload again in a minute.");
-          throw new Error("Claude couldn't read this workbook: " + (e.message || e.code));
+    const name = file.name || "upload";
+    if (EXCEL.test(name)) {
+      const parsed = C.importWorkbook(buf, name);
+      const data = N.templateToData(parsed.spec);
+      if (N.coverage(data) >= 0.6) return { spec: N.standardSpec(data, name), warnings: parsed.warnings, checks: [], method: "template" };
+      status("This workbook has a different layout. Claude is reading it into the standard format…");
+      const limits = await sampleLimits();
+      const dump = N.workbookDump(buf, maxChars(limits));
+      return extractWithClaude({ text: dump.text, cells: dump.cells, truncated: dump.truncated, source: "workbook", name, limits });
+    }
+    if (!cap.sample) throw new Error("Reading a file that isn't in the usual Excel template needs Claude, which isn't available in this view. Open the artifact on claude.ai and upload it there.");
+    const limits = await sampleLimits();
+    let text = "";
+    if (/\.(csv|txt)$/i.test(name)) text = new TextDecoder().decode(buf);
+    else if (/\.docx$/i.test(name)) { status("Reading the Word document…"); text = await N.docxText(buf); }
+    else if (/\.pdf$/i.test(name)) {
+      status("Reading the PDF…");
+      const pdf = await window.pdfjsLib.getDocument({ data: buf.slice() }).promise;
+      text = await pdfToText(pdf);
+      if (text.replace(/\s|#|Page|\d/g, "").length < 200 * pdf.numPages * 0.25) { // little or no text layer: a scan
+        status("This PDF is a scan. Claude is reading the page images…");
+        const images = await pdfToImages(pdf, limits);
+        return extractWithClaude({ images, source: "images", name, limits, pagesSkipped: pdf.numPages - images.length });
+      }
+    } else if (IMAGE.test(name)) {
+      status("Claude is reading the image…");
+      return extractWithClaude({ images: [file], source: "images", name, limits });
+    } else throw new Error("That file type can't be read. Upload Excel, PDF, Word, CSV, text or an image (PNG/JPG).");
+    const max = maxChars(limits);
+    status("Claude is reading the document into the standard format…");
+    return extractWithClaude({ text: text.slice(0, max), cells: N.textCells(text), truncated: text.length > max, source: "text", name, limits });
+  }
+
+  async function sampleLimits() { try { return cap.sample ? await cap.sample.limits() : null; } catch (_) { return null; } }
+  const maxChars = (limits) => Math.max(20000, ((limits && limits.maxPromptBytes) || 262144) - 14000);
+
+  /** Text of a PDF, one line per text row, with wide gaps shown as " | " so tables stay readable. */
+  async function pdfToText(pdf) {
+    let out = "";
+    for (let p = 1; p <= pdf.numPages; p++) {
+      const page = await pdf.getPage(p);
+      const tc = await page.getTextContent();
+      const rows = new Map();
+      for (const it of tc.items) {
+        if (!it.str || !it.str.trim()) continue;
+        const y = Math.round(it.transform[5] / 3) * 3;
+        if (!rows.has(y)) rows.set(y, []);
+        rows.get(y).push({ x: it.transform[4], w: it.width || 0, s: it.str, h: Math.abs(it.transform[3]) || 8 });
+      }
+      out += `\n### Page ${p}\n`;
+      for (const y of [...rows.keys()].sort((a, b) => b - a)) {
+        const items = rows.get(y).sort((a, b) => a.x - b.x);
+        let line = "", end = null;
+        for (const it of items) {
+          if (end !== null) line += it.x - end > it.h * 1.2 ? " | " : it.x - end > it.h * 0.15 ? " " : "";
+          line += it.s; end = it.x + it.w;
         }
-        method = "claude";
-        if (raw && raw.kind === "engine") {
-          const ed = N.cleanEngineData(raw.engine);
-          return { spec: N.standardEngineSpec(ed, filename), method, kind: "engine",
-                   warnings: [...(dump.truncated ? ["The workbook is very large, so only its first part was read."] : []), ...ed.notes.map((n) => "Claude noted: " + n)],
-                   checks: N.verifyAgainstWorkbook(ed, dump.cells) };
-        }
-        data = N.cleanData(raw && raw.aircraft ? raw.aircraft : raw);
-        warnings = [...(dump.truncated ? ["The workbook is very large, so only its first part was read."] : []), ...data.notes.map((n) => "Claude noted: " + n)];
-        checks = N.verifyAgainstWorkbook(data, dump.cells);
+        out += line.trim() + "\n";
       }
     }
-    return { spec: N.standardSpec(data, filename), warnings, checks, method };
+    return out;
+  }
+
+  async function pdfToImages(pdf, limits) {
+    const max = Math.min(pdf.numPages, (limits && limits.images && limits.images.maxCount) || 8, 20);
+    const blobs = [];
+    for (let p = 1; p <= max; p++) {
+      const page = await pdf.getPage(p);
+      const base = page.getViewport({ scale: 1 });
+      const vp = page.getViewport({ scale: Math.min(2.5, 1600 / base.width) });
+      const cv = document.createElement("canvas"); cv.width = Math.round(vp.width); cv.height = Math.round(vp.height);
+      const ctx = cv.getContext("2d"); ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, cv.width, cv.height);
+      await page.render({ canvasContext: ctx, viewport: vp }).promise;
+      blobs.push(await new Promise((r) => cv.toBlob(r, "image/jpeg", 0.85)));
+    }
+    return blobs;
+  }
+
+  async function extractWithClaude({ text, cells, images, truncated, source, name, limits, pagesSkipped }) {
+    const N = window.SpecNormalize;
+    if (!cap.sample) throw new Error("Claude isn't available in this view to read this file. Open the artifact on claude.ai and upload it there.");
+    if (images && !(limits && limits.images)) throw new Error("This view can't send images to Claude. Open the artifact on claude.ai, or upload a PDF with selectable text, Excel or Word instead.");
+    const tiers = limits && limits.modelTiers;
+    const opts = { modelTier: !tiers || tiers.includes("complex") ? "complex" : "default" };
+    if (images) opts.images = images;
+    let raw;
+    try { raw = await cap.sample.json(N.extractionPrompt(text || "", name, source), opts); }
+    catch (e) {
+      if (e && e.code === "not_granted") throw new Error("Claude wasn't allowed to read the file. Allow it when asked, then upload again.");
+      if (e && e.code === "rate_limited") throw new Error("Claude is busy right now. Try the upload again in a minute.");
+      throw new Error("Claude couldn't read this file: " + (e.message || e.code));
+    }
+    const pre = [
+      ...(truncated ? ["The file is very large, so only its first part was read."] : []),
+      ...(pagesSkipped > 0 ? [`Only the first ${images.length} pages were read; ${pagesSkipped} more were left out.`] : []),
+      ...(images ? ["Read from page images, so the values couldn't be checked against text. Compare them with the original before sending."] : []),
+    ];
+    const verify = (d) => (cells ? N.verifyAgainstWorkbook(d, cells) : []);
+    if (raw && raw.kind === "engine") {
+      const ed = N.cleanEngineData(raw.engine);
+      return { spec: N.standardEngineSpec(ed, name), method: "claude", source, warnings: [...pre, ...ed.notes.map((n) => "Claude noted: " + n)], checks: verify(ed) };
+    }
+    const data = N.cleanData(raw && raw.aircraft ? raw.aircraft : raw);
+    return { spec: N.standardSpec(data, name), method: "claude", source, warnings: [...pre, ...data.notes.map((n) => "Claude noted: " + n)], checks: verify(data) };
   }
 
   /** Write a new version and point the aircraft summary at it. expectVersion guards against overwriting someone else's save. */
@@ -376,8 +458,8 @@
       ro ? null : h("button", { class: "btn primary", id: "save-btn", disabled: !ws.dirty, onclick: () => save() }, "Save"),
       ro ? null : h("button", { class: "btn", id: "discard-btn", disabled: !ws.dirty, onclick: async () => {
         if (await confirmDialog("Discard changes?", "Your unsaved edits to this spec sheet will be dropped.", "Discard", "danger")) { ws.spec = clone(ws.saved); ws.dirty = false; ws.highlight.clear(); renderWorkspace(); schedulePreview(0); } } }, "Discard"),
-      ro ? null : h("button", { class: "btn", onclick: () => pickFile(".xlsx,.xlsm", async (f) => {
-        if (!ws.dirty || await confirmDialog("Replace unsaved edits?", "Uploading a workbook saves its data as a new version. Your unsaved edits will be dropped.", "Upload")) { ws.dirty = false; importExcel(f, ws.id); } }) }, "Update from Excel"),
+      ro ? null : h("button", { class: "btn", onclick: () => pickFile(ACCEPT, async (f) => {
+        if (!ws.dirty || await confirmDialog("Replace unsaved edits?", "Uploading a file saves its data as a new version. Your unsaved edits will be dropped.", "Upload")) { ws.dirty = false; importExcel(f, ws.id); } }) }, "Update from file"),
       h("button", { class: "btn", onclick: showHistory }, "History"),
       h("button", { class: "btn sky", onclick: downloadPdf }, "Download PDF"),
       ro ? null : h("button", { class: "btn ghost", "aria-label": "More actions", onclick: moreActions }, "•••"));

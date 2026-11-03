@@ -329,10 +329,19 @@
   "notes": [""]
 }`;
 
-  function extractionPrompt(dump, filename) {
-    return `You are reading a technical specification workbook for ACIA Aero Leasing. Different lessors, airlines and MROs lay these workbooks out differently. Extract the information into ACIA's standard structure.
+  /**
+   * source: "workbook" (cell dump), "text" (text pulled from a PDF, Word file, CSV...) or "images" (pages attached as images).
+   */
+  function extractionPrompt(dump, filename, source) {
+    source = source || "workbook";
+    const how = source === "workbook"
+      ? `${how}`
+      : source === "text"
+        ? `The document "${filename}" is given below as text extracted from it. Table cells on one line are separated by " | ". Page breaks are marked "### Page N".`
+        : `The document "${filename}" is attached as images, one per page, in order. Read every page, including tables and small print.`;
+    return `You are reading a technical specification document for ACIA Aero Leasing. It may be an Excel workbook, a PDF or Word spec sheet, a status report or a scan, and different lessors, airlines and MROs lay these out differently. Extract the information into ACIA's standard structure.
 
-First decide what the workbook describes:
+First decide what the document describes:
 - "aircraft": a whole aircraft (MSN, registration, airframe hours/cycles, installed engines, landing gear...).
 - "engine": a standalone engine offered on its own (an ESN with engine times, LLPs and shop visits, and no airframe data).
 Answer {"kind": "aircraft", "aircraft": {...}} or {"kind": "engine", "engine": {...}}.
@@ -343,7 +352,7 @@ Engine field meanings: info_date = the date the data is current to; thrust = thr
 
 For an AIRCRAFT, fill this structure:
 
-The workbook "${filename}" is given below as text: each line is one row ("R12:"), and each cell is "<column letter>=<value as Excel displays it>".
+${how}
 
 ${STANDARD_SCHEMA}
 
@@ -358,15 +367,13 @@ Aircraft field meanings:
 - avionics: one entry per avionics component row.
 
 Rules:
-- Copy every value exactly as it appears in the workbook text. Do not calculate, convert units, reformat dates or round numbers, and never invent a value. The only exception is weights, where you may append the unit shown elsewhere in the workbook.
-- Leave a field as "" when the workbook does not give it, and leave out list entries that have no data. Remove the example entries if they do not apply.
+- Copy every value exactly as it appears in the document. Do not calculate, convert units, reformat dates or round numbers, and never invent a value. The only exception is weights, where you may append the unit shown elsewhere in the document.
+- Leave a field as "" when the document does not give it, and leave out list entries that have no data. Remove the example entries if they do not apply.
 - Ignore helper cells such as "For automatic calculation - don't modify", and ignore Excel errors such as #VALUE! (record them in notes).
 - In notes, list anything ambiguous, contradictory (e.g. two different registrations), or that you could not place.
 - Answer with the JSON object only: {"kind": ..., "aircraft" or "engine": {...}}.
 
-<workbook>
-${dump}
-</workbook>`;
+${source === "images" ? "" : `<document>\n${dump}\n</document>`}`;
   }
 
   // ---------------------------------------------------------------- guard rail: every extracted value must exist in the workbook
@@ -400,7 +407,7 @@ ${dump}
         if (["position", "unit", "name", "part", "label", "bold", "llp_units", "notes"].includes(k)) continue;
         walk(v, [path, seg(k)].filter(Boolean).join(" › "));
       }
-      else if (typeof o === "string" && !ok(o)) problems.push(`${path}: "${o}" isn't in the workbook`);
+      else if (typeof o === "string" && !ok(o)) problems.push(`${path}: "${o}" isn't in the source file`);
     };
     walk({ ...d, notes: undefined }, "");
     return problems;
@@ -450,5 +457,42 @@ ${dump}
     return d;
   }
 
-  root.SpecNormalize = { standardEngineSpec, cleanEngineData, templateToData, standardSpec, coverage, workbookDump, extractionPrompt, verifyAgainstWorkbook, cleanData, emptyData };
+  /** Cells for verification from free text: whole lines, " | " cells and single tokens. */
+  function textCells(text) {
+    const out = [];
+    for (const line of String(text || "").split(/\n/)) {
+      const l = line.trim(); if (!l) continue;
+      out.push(l);
+      for (const part of l.split(/\s*\|\s*|\t|\s{2,}/)) if (part) out.push(part.trim());
+      for (const tok of l.split(/[\s|:;]+/)) if (tok) out.push(tok);
+    }
+    return out;
+  }
+
+  /** Text of a .docx: paragraphs, and table rows as "cell | cell". Needs JSZip. */
+  async function docxText(buffer) {
+    const zip = await root.JSZip.loadAsync(buffer);
+    const f = zip.file("word/document.xml");
+    if (!f) throw new Error("This Word file has no readable body.");
+    const doc = new DOMParser().parseFromString(await f.async("string"), "application/xml");
+    const W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+    const text = (el) => [...el.getElementsByTagNameNS(W, "t")].map((t) => t.textContent).join("");
+    const lines = [];
+    const body = doc.getElementsByTagNameNS(W, "body")[0];
+    const walk = (el) => {
+      for (const child of el.children) {
+        if (child.localName === "p") { const t = text(child).trim(); if (t) lines.push(t); }
+        else if (child.localName === "tbl") {
+          for (const tr of child.getElementsByTagNameNS(W, "tr")) {
+            const cells = [...tr.children].filter((c) => c.localName === "tc").map((tc) => text(tc).trim());
+            if (cells.some(Boolean)) lines.push(cells.join(" | "));
+          }
+        } else if (child.children && child.children.length) walk(child);
+      }
+    };
+    if (body) walk(body);
+    return lines.join("\n");
+  }
+
+  root.SpecNormalize = { textCells, docxText, standardEngineSpec, cleanEngineData, templateToData, standardSpec, coverage, workbookDump, extractionPrompt, verifyAgainstWorkbook, cleanData, emptyData };
 })(typeof window !== "undefined" ? window : globalThis);
