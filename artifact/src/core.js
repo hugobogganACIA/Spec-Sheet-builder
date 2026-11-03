@@ -470,7 +470,6 @@
     };
     const facts = isEngine ? [
       ["ESN", cover.msn],
-      ["YEAR BUILT", cover.year],
       ["TSN", kvLike(/\bTSN\b|TIME SINCE NEW/i)],
       ["CSN", kvLike(/\bCSN\b|CYCLES SINCE NEW/i)],
     ] : [
@@ -592,7 +591,7 @@
           { type: "polyline", closePath: true, points: [{ x: 0, y: 0 }, { x: PAGE_W, y: 0 }, { x: PAGE_W, y: 188 }, { x: 0, y: 244 }], color: NAVY },
           // facts strip rules
           { type: "line", x1: 36, y1: 474, x2: PAGE_W - 36, y2: 474, lineWidth: 0.8, lineColor: NAVY },
-          ...[1, 2, 3].map((i) => ({ type: "line", x1: 36 + i * (PAGE_W - 72) / 4, y1: 486, x2: 36 + i * (PAGE_W - 72) / 4, y2: 520, lineWidth: 0.5, lineColor: RULE })),
+          ...facts.slice(1).map((_, j) => { const x = 36 + (j + 1) * (PAGE_W - 72) / facts.length; return { type: "line", x1: x, y1: 486, x2: x, y2: 520, lineWidth: 0.5, lineColor: RULE }; }),
           // contacts band
           { type: "polyline", closePath: true, points: [{ x: 0, y: 560 }, { x: PAGE_W, y: 548 }, { x: PAGE_W, y: PAGE_H }, { x: 0, y: PAGE_H }], color: NAVY },
           { type: "polyline", closePath: true, points: [{ x: 0, y: 556 }, { x: PAGE_W, y: 544 }, { x: PAGE_W, y: 548 }, { x: 0, y: 560 }], color: SKY }] }
@@ -661,21 +660,5 @@
   }
   const ENGINE_TYPES = [["pw127", "Pratt & Whitney PW127"], ["pt6", "Pratt & Whitney PT6"], ["v2500", "IAE V2500"]];
 
-  /** A blank engine spec sheet to fill in. */
-  function newEngineSpec(model, esn, year) {
-    const kv = (title, labels) => ({ id: newId(), type: "kv", title, rows: labels.map((l) => ({ label: l, value: "" })), page_break_before: false, hidden: false });
-    const general = kv("General Description", ["INFORMATION DATE", "ENGINE MANUFACTURER", "ENGINE MODEL", "ENGINE SERIAL NUMBER", "DATE OF MANUFACTURE",
-      "TIME SINCE NEW (TSN)", "CYCLES SINCE NEW (CSN)", "TIME SINCE LAST SHOP VISIT", "CYCLES SINCE LAST SHOP VISIT", "LAST SHOP VISIT DATE", "LAST SHOP VISIT MRO", "LOCATION"]);
-    const set = (l, v) => { const r = general.rows.find((x) => x.label === l); if (r) r.value = v; };
-    set("ENGINE MODEL", model); set("ENGINE SERIAL NUMBER", esn);
-    return {
-      cover: { kind: "engine", model, msn: esn, year: year || "", illustration: "auto", engine_illustration: "auto" },
-      sections: [general,
-        { id: newId(), type: "grid", title: "LIFE LIMITED PARTS", label_header: "", groups: [], columns: ["Part No.", "Serial No.", "Limit", "CSN", "Remaining"],
-          rows: [{ label: "", cells: ["", "", "", "", ""] }], page_break_before: true, hidden: false }],
-      attachments: [], source: { filename: "", info_date: "" },
-    };
-  }
-
-  root.SpecCore = { cellText, newEngineSpec, aircraftKey, AIRCRAFT_TYPES, engineKey, ENGINE_TYPES, importWorkbook, workbookImages, diff, applyOps, buildPdf, formatNumber, newId, setLayoutDefaults };
+  root.SpecCore = { cellText, aircraftKey, AIRCRAFT_TYPES, engineKey, ENGINE_TYPES, importWorkbook, workbookImages, diff, applyOps, buildPdf, formatNumber, newId, setLayoutDefaults };
 })(typeof window !== "undefined" ? window : globalThis);

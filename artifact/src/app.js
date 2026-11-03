@@ -144,7 +144,7 @@
     const drop = h("div", { class: "drop" },
       h("div", { class: "glyph", "aria-hidden": "true" }, "XLSX"),
       h("div", { class: "grow" }, h("strong", {}, "Drop a tech spec workbook here"),
-        h("div", { class: "small muted" }, "A new MSN creates a spec sheet. An MSN already in the fleet gets a new version, and you'll see every value that changed.")),
+        h("div", { class: "small muted" }, "Aircraft and engine workbooks in any layout. A new MSN or ESN creates a spec sheet; one already in the fleet gets a new version, and you'll see every value that changed.")),
       h("button", { class: "btn primary", disabled: !cap.db || !canWrite, onclick: () => pickFile(".xlsx,.xlsm", (f) => importExcel(f)) }, "Upload Excel"));
     if (cap.db && canWrite) {
       drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("over"); });
@@ -165,7 +165,7 @@
     $view.replaceChildren(
       h("div", { class: "fleet-head" }, h("div", { class: "grow" }, h("h1", {}, "Fleet spec sheets"),
         h("div", { class: "muted" }, `${fleet.filter((a) => a.kind !== "engine").length} aircraft · ${fleet.filter((a) => a.kind === "engine").length} engines · PDF in the ACIA layout, generated from the latest saved version`)),
-        !canWrite ? h("span", { class: "chip" }, "View only") : h("button", { class: "btn", disabled: !cap.db, onclick: newEngineDialog }, "+ New engine spec sheet")),
+        !canWrite ? h("span", { class: "chip" }, "View only") : null),
       drop, list);
   }
 
@@ -199,13 +199,15 @@
       const buf = new Uint8Array(await file.arrayBuffer());
       const { spec, warnings, checks, method } = await readWorkbook(buf, file.name, (msg) => { done(); done = busy(msg); });
       const msn = spec.cover.msn;
-      if (!msn) throw new Error("Couldn't find the aircraft serial number (MSN) in this workbook. Add it to the workbook, or check it's an aircraft tech spec.");
-      const id = intoId || aid(msn);
+      const isEngine = spec.cover.kind === "engine";
+      const idLabel = isEngine ? "ESN" : "MSN";
+      if (!msn) throw new Error(isEngine ? "Couldn't find the engine serial number (ESN) in this workbook." : "Couldn't find the aircraft serial number (MSN) in this workbook. Add it to the workbook and upload it again.");
+      const id = intoId || (isEngine ? "esn-" + String(msn).trim().replace(/[^A-Za-z0-9_.\-]/g, "_") : aid(msn));
       const sumRef = cap.db.doc("aircraft/" + id);
       const sum = await sumRef.get();
       const prev = sum.exists && !sum.data().archived ? await cap.db.doc(`aircraft/${id}/versions/${vid(sum.data().version)}`).get() : null;
       const prevSpec = prev && prev.exists ? prev.data().spec : null;
-      if (intoId && prevSpec && prevSpec.cover.msn && String(prevSpec.cover.msn) !== String(msn)) warnings.unshift(`This workbook is for MSN ${msn}, but you uploaded it to MSN ${prevSpec.cover.msn}.`);
+      if (intoId && prevSpec && prevSpec.cover.msn && String(prevSpec.cover.msn) !== String(msn)) warnings.unshift(`This workbook is for ${idLabel} ${msn}, but you uploaded it to ${prevSpec.cover.kind === "engine" ? "ESN" : "MSN"} ${prevSpec.cover.msn}.`);
 
       // Images in the workbook body (LOPA) become extra pages; identical images are reused, not re-uploaded.
       const imgs = await C.workbookImages(buf).catch(() => []);
@@ -223,31 +225,14 @@
       const changes = C.diff(prevSpec, finalSpec);
       await saveVersion(id, finalSpec, "Excel upload", file.name, sum.exists && !sum.data().archived ? sum.data().version : 0);
       done();
-      dialog(prevSpec ? `MSN ${msn} updated` : `MSN ${msn} added`,
-        h("div", {}, h("p", {}, prevSpec ? `Saved as a new version. ${changes.length} value${changes.length === 1 ? "" : "s"} changed since the previous version.` : "A new spec sheet was created from the workbook."),
+      dialog(prevSpec ? `${idLabel} ${msn} updated` : `${idLabel} ${msn} added`,
+        h("div", {}, h("p", {}, prevSpec ? `Saved as a new version. ${changes.length} value${changes.length === 1 ? "" : "s"} changed since the previous version.` : isEngine ? "A new engine spec sheet was created from the workbook." : "A new spec sheet was created from the workbook."),
           method === "claude" ? h("p", { class: "small muted" }, "This workbook isn't in the usual template, so Claude read it into the standard layout. Every value was checked against the workbook's cells.") : null,
           checks && checks.length ? h("div", { class: "warn" }, h("strong", {}, `${checks.length} value${checks.length > 1 ? "s" : ""} Claude returned couldn't be found in the workbook. Check them before sending the PDF out:`),
             h("ul", {}, checks.slice(0, 30).map((x) => h("li", {}, x)))) : null,
           warningsBox(warnings), prevSpec ? changesTable(changes) : null),
         [{ label: "Open spec sheet", cls: "primary", run: () => { if (ws && ws.id === id) openAircraft(id, true); else location.hash = "#ac-" + id; } }]);
     } catch (e) { done(); toast(e.message || String(e), true); }
-  }
-
-  function newEngineDialog() {
-    const v = { model: "", esn: "", year: "" };
-    const field = (label, key, ph) => { const id = fid("ne"); return h("div", { class: "field" }, h("label", { for: id }, label),
-      h("input", { class: "input", id, placeholder: ph, oninput: (e) => (v[key] = e.target.value.trim()) })); };
-    dialog("New engine spec sheet", h("div", {},
-      h("p", { class: "muted" }, "Creates an engine spec sheet with a General Description and an LLP table to fill in. The cover shows the matching engine graphic."),
-      h("div", { class: "grid3" }, field("Engine model", "model", "PW127M"), field("ESN", "esn", "PCE-ED0844"), field("Year of manufacture", "year", "2012"))),
-      [{ label: "Cancel" }, { label: "Create", cls: "primary", run: async () => {
-        if (!v.model || !v.esn) { toast("Enter the engine model and ESN.", true); return false; }
-        const id = "esn-" + v.esn.replace(/[^A-Za-z0-9_.\-]/g, "_");
-        const cur = await cap.db.doc("aircraft/" + id).get();
-        if (cur.exists && !cur.data().archived) { toast(`ESN ${v.esn} already has a spec sheet.`, true); return false; }
-        await saveVersion(id, C.newEngineSpec(v.model, v.esn, v.year), "Created", "", undefined);
-        location.hash = "#ac-" + id;
-      } }]);
   }
 
   /**
@@ -278,8 +263,14 @@
           if (e && e.code === "rate_limited") throw new Error("Claude is busy right now. Try the upload again in a minute.");
           throw new Error("Claude couldn't read this workbook: " + (e.message || e.code));
         }
-        data = N.cleanData(raw);
         method = "claude";
+        if (raw && raw.kind === "engine") {
+          const ed = N.cleanEngineData(raw.engine);
+          return { spec: N.standardEngineSpec(ed, filename), method, kind: "engine",
+                   warnings: [...(dump.truncated ? ["The workbook is very large, so only its first part was read."] : []), ...ed.notes.map((n) => "Claude noted: " + n)],
+                   checks: N.verifyAgainstWorkbook(ed, dump.cells) };
+        }
+        data = N.cleanData(raw && raw.aircraft ? raw.aircraft : raw);
         warnings = [...(dump.truncated ? ["The workbook is very large, so only its first part was read."] : []), ...data.notes.map((n) => "Claude noted: " + n)];
         checks = N.verifyAgainstWorkbook(data, dump.cells);
       }
@@ -471,7 +462,7 @@ Answer with JSON only: {"summary": "one or two sentences", "ops": [{"op": "...",
       h("option", { value: "aircraft" }, "Aircraft"), h("option", { value: "engine" }, "Engine"));
     kindSel.value = isEngine ? "engine" : "aircraft";
     return h("div", { class: "panel pad" }, h("h2", { style: "margin-bottom:10px" }, "Cover page"),
-      h("div", { class: "grid3" }, f(isEngine ? "Engine model" : "Aircraft model", "model"), f(isEngine ? "ESN" : "Aircraft MSN", "msn"), f("Year of manufacture", "year")),
+      h("div", { class: "grid3" }, f(isEngine ? "Engine model" : "Aircraft model", "model"), f(isEngine ? "ESN" : "Aircraft MSN", "msn"), isEngine ? h("div", {}) : f("Year of manufacture", "year")),
       h("div", { class: "grid2", style: "margin-top:12px" },
         h("div", { class: "field" }, h("label", { for: kindId }, "Spec sheet for"), kindSel),
         isEngine ? h("div", { class: "field" }, h("label", { for: engId }, "Engine illustration (cover)"), engSel)

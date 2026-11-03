@@ -672,7 +672,6 @@ table.changes td.new { color: var(--ok); font-weight: 600; font-family: var(--mo
     };
     const facts = isEngine ? [
       ["ESN", cover.msn],
-      ["YEAR BUILT", cover.year],
       ["TSN", kvLike(/\bTSN\b|TIME SINCE NEW/i)],
       ["CSN", kvLike(/\bCSN\b|CYCLES SINCE NEW/i)],
     ] : [
@@ -794,7 +793,7 @@ table.changes td.new { color: var(--ok); font-weight: 600; font-family: var(--mo
           { type: "polyline", closePath: true, points: [{ x: 0, y: 0 }, { x: PAGE_W, y: 0 }, { x: PAGE_W, y: 188 }, { x: 0, y: 244 }], color: NAVY },
           // facts strip rules
           { type: "line", x1: 36, y1: 474, x2: PAGE_W - 36, y2: 474, lineWidth: 0.8, lineColor: NAVY },
-          ...[1, 2, 3].map((i) => ({ type: "line", x1: 36 + i * (PAGE_W - 72) / 4, y1: 486, x2: 36 + i * (PAGE_W - 72) / 4, y2: 520, lineWidth: 0.5, lineColor: RULE })),
+          ...facts.slice(1).map((_, j) => { const x = 36 + (j + 1) * (PAGE_W - 72) / facts.length; return { type: "line", x1: x, y1: 486, x2: x, y2: 520, lineWidth: 0.5, lineColor: RULE }; }),
           // contacts band
           { type: "polyline", closePath: true, points: [{ x: 0, y: 560 }, { x: PAGE_W, y: 548 }, { x: PAGE_W, y: PAGE_H }, { x: 0, y: PAGE_H }], color: NAVY },
           { type: "polyline", closePath: true, points: [{ x: 0, y: 556 }, { x: PAGE_W, y: 544 }, { x: PAGE_W, y: 548 }, { x: 0, y: 560 }], color: SKY }] }
@@ -863,23 +862,7 @@ table.changes td.new { color: var(--ok); font-weight: 600; font-family: var(--mo
   }
   const ENGINE_TYPES = [["pw127", "Pratt & Whitney PW127"], ["pt6", "Pratt & Whitney PT6"], ["v2500", "IAE V2500"]];
 
-  /** A blank engine spec sheet to fill in. */
-  function newEngineSpec(model, esn, year) {
-    const kv = (title, labels) => ({ id: newId(), type: "kv", title, rows: labels.map((l) => ({ label: l, value: "" })), page_break_before: false, hidden: false });
-    const general = kv("General Description", ["INFORMATION DATE", "ENGINE MANUFACTURER", "ENGINE MODEL", "ENGINE SERIAL NUMBER", "DATE OF MANUFACTURE",
-      "TIME SINCE NEW (TSN)", "CYCLES SINCE NEW (CSN)", "TIME SINCE LAST SHOP VISIT", "CYCLES SINCE LAST SHOP VISIT", "LAST SHOP VISIT DATE", "LAST SHOP VISIT MRO", "LOCATION"]);
-    const set = (l, v) => { const r = general.rows.find((x) => x.label === l); if (r) r.value = v; };
-    set("ENGINE MODEL", model); set("ENGINE SERIAL NUMBER", esn);
-    return {
-      cover: { kind: "engine", model, msn: esn, year: year || "", illustration: "auto", engine_illustration: "auto" },
-      sections: [general,
-        { id: newId(), type: "grid", title: "LIFE LIMITED PARTS", label_header: "", groups: [], columns: ["Part No.", "Serial No.", "Limit", "CSN", "Remaining"],
-          rows: [{ label: "", cells: ["", "", "", "", ""] }], page_break_before: true, hidden: false }],
-      attachments: [], source: { filename: "", info_date: "" },
-    };
-  }
-
-  root.SpecCore = { cellText, newEngineSpec, aircraftKey, AIRCRAFT_TYPES, engineKey, ENGINE_TYPES, importWorkbook, workbookImages, diff, applyOps, buildPdf, formatNumber, newId, setLayoutDefaults };
+  root.SpecCore = { cellText, aircraftKey, AIRCRAFT_TYPES, engineKey, ENGINE_TYPES, importWorkbook, workbookImages, diff, applyOps, buildPdf, formatNumber, newId, setLayoutDefaults };
 })(typeof window !== "undefined" ? window : globalThis);
 
 </script>
@@ -944,6 +927,13 @@ table.changes td.new { color: var(--ok); font-weight: 600; font-family: var(--mo
     ["MAXIMUM ZERO FUEL WEIGHT (MZFW)", /ZERO FUEL|MZFW/],
     ["MAXIMUM FUEL", /MAXIMUM FUEL|FUEL CAPACITY/],
     ["DATE OF LAST WEIGHING", /WEIGHING/],
+  ];
+  // Standalone engine spec sheets
+  const ENGINE_GENERAL = [
+    ["info_date", "INFORMATION DATE"], ["manufacturer", "ENGINE MANUFACTURER"], ["model", "ENGINE MODEL"], ["esn", "ENGINE SERIAL NUMBER"],
+    ["thrust", "THRUST / POWER RATING"], ["dom", "DATE OF MANUFACTURE"], ["tsn", "TIME SINCE NEW (TSN)"], ["csn", "CYCLES SINCE NEW (CSN)"],
+    ["tslsv", "TIME SINCE LAST SHOP VISIT (TSLSV)"], ["cslsv", "CYCLES SINCE LAST SHOP VISIT (CSLSV)"], ["last_sv_date", "LAST SHOP VISIT DATE"],
+    ["last_sv_mro", "LAST SHOP VISIT MRO"], ["last_sv_workscope", "LAST SHOP VISIT WORKSCOPE"], ["status", "CONDITION / STATUS"], ["location", "LOCATION"],
   ];
   const fieldFor = (set, label) => { const l = up(label); const f = set.find(([, , re]) => re.test(l)); return f ? f[0] : null; };
 
@@ -1124,6 +1114,27 @@ table.changes td.new { color: var(--ok); font-weight: 600; font-family: var(--mo
              source: { filename: filename || "", info_date: general["INFORMATION DATE"] } };
   }
 
+  // ---------------------------------------------------------------- engine data -> the standard engine layout
+  function emptyEngineData() { return { general: {}, general_extra: [], modules: [], llps: [], shop_visits: [], options: [], notes: [] }; }
+
+  function standardEngineSpec(d, filename) {
+    const id = C.newId;
+    const S = [];
+    const grid = (title, label_header, columns, rows, brk) => ({ id: id(), type: "grid", title, label_header, groups: [], columns, rows, page_break_before: !!brk, hidden: false });
+    S.push({ id: id(), type: "kv", title: "General Description", page_break_before: false, hidden: false,
+             rows: [...ENGINE_GENERAL.map(([k, label]) => ({ label, value: d.general[k] || "" })), ...(d.general_extra || [])] });
+    if (d.modules.length) S.push(grid("MODULES", "", ["Serial No.", "TSN", "CSN", "TSO", "CSO"],
+      d.modules.map((m) => ({ label: m.name, cells: [m.sn, m.tsn, m.csn, m.tso, m.cso] }))));
+    if (d.llps.length) S.push(grid("LIFE LIMITED PARTS", "", ["Module", "Part No.", "Serial No.", "Limit", "CSN", "Remaining"],
+      d.llps.map((p) => ({ label: p.part, cells: [p.module, p.pn, p.sn, p.limit, p.csn, p.remaining] })), true));
+    if (d.shop_visits.length) S.push(grid("SHOP VISIT HISTORY", "DATE", ["MRO", "TSN", "CSN", "Workscope", "Reason"],
+      d.shop_visits.map((v) => ({ label: v.date, cells: [v.mro, v.tsn, v.csn, v.workscope, v.reason] }))));
+    if (d.options.length) { S.push({ id: id(), type: "heading", title: "NOTES", page_break_before: false, hidden: false });
+      S.push({ id: id(), type: "list", title: "", items: d.options, page_break_before: false, hidden: false }); }
+    return { cover: { kind: "engine", model: d.general.model || "", msn: d.general.esn || "", year: "" }, sections: S, attachments: [],
+             source: { filename: filename || "", info_date: d.general.info_date || "" } };
+  }
+
   // ---------------------------------------------------------------- any layout: dump the workbook as text for Claude
   function workbookDump(buffer, maxChars) {
     const XLSX = root.XLSX;
@@ -1176,15 +1187,36 @@ table.changes td.new { color: var(--ok); font-weight: 600; font-family: var(--mo
   "notes": [""]
 }`;
 
+  const ENGINE_SCHEMA = `{
+  "general": {"info_date": "", "manufacturer": "", "model": "", "esn": "", "thrust": "", "dom": "", "tsn": "", "csn": "", "tslsv": "", "cslsv": "",
+              "last_sv_date": "", "last_sv_mro": "", "last_sv_workscope": "", "status": "", "location": ""},
+  "general_extra": [{"label": "", "value": ""}],
+  "modules": [{"name": "Fan", "sn": "", "tsn": "", "csn": "", "tso": "", "cso": ""}],
+  "llps": [{"module": "HPT", "part": "HPT STAGE 1 DISK", "pn": "", "sn": "", "limit": "", "csn": "", "remaining": ""}],
+  "shop_visits": [{"date": "", "mro": "", "tsn": "", "csn": "", "workscope": "", "reason": ""}],
+  "options": [{"text": "", "bold": false}],
+  "notes": [""]
+}`;
+
   function extractionPrompt(dump, filename) {
-    return `You are reading an aircraft technical specification workbook for ACIA Aero Leasing. Different lessors, airlines and MROs lay these workbooks out differently. Extract the information into ACIA's standard structure.
+    return `You are reading a technical specification workbook for ACIA Aero Leasing. Different lessors, airlines and MROs lay these workbooks out differently. Extract the information into ACIA's standard structure.
+
+First decide what the workbook describes:
+- "aircraft": a whole aircraft (MSN, registration, airframe hours/cycles, installed engines, landing gear...).
+- "engine": a standalone engine offered on its own (an ESN with engine times, LLPs and shop visits, and no airframe data).
+Answer {"kind": "aircraft", "aircraft": {...}} or {"kind": "engine", "engine": {...}}.
+
+For an ENGINE, fill this structure (example values are illustrations, not data):
+${ENGINE_SCHEMA}
+Engine field meanings: info_date = the date the data is current to; thrust = thrust or shaft-power rating; tsn/csn = engine time and cycles since new; tslsv/cslsv = since last shop visit; status = e.g. serviceable, QEC'd, on wing, in storage. modules = per-module serial numbers and times. llps = every life-limited part with its module, part number, serial number, life limit, cycles used and cycles remaining. shop_visits = shop visit history, newest first. options = ADs, SBs, modifications or other notes, one line each.
+
+For an AIRCRAFT, fill this structure:
 
 The workbook "${filename}" is given below as text: each line is one row ("R12:"), and each cell is "<column letter>=<value as Excel displays it>".
 
-Fill this JSON structure (the values shown are examples of positions and names, not data):
 ${STANDARD_SCHEMA}
 
-Field meanings:
+Aircraft field meanings:
 - general: info_date = the date the data is current to; type = aircraft type/model as written (e.g. "72-212A (600)"); config = PAX/cargo/combi; dom = date of manufacture; age = aircraft age in years; tt/tc = airframe total time (hours) and total cycles; reg = registration; msn = manufacturer serial number. Put any other aircraft-level facts in general_extra.
 - engines: units = one entry per installed engine (position, engine type, ESN, TSN, CSN). modules = per-engine module data such as Turbomachinery / RGB / fan / core / LPT with serial numbers and time or cycles since overhaul and hot section. llps = life-limited parts: one entry per part, with one {limit, csn, remaining} per engine in the same order as llp_units (llp_units = "<position> <ESN>").
 - propellers (turboprops only; leave empty for jets): hub/actuator/assembly data per side, and per-blade data per side.
@@ -1199,7 +1231,7 @@ Rules:
 - Leave a field as "" when the workbook does not give it, and leave out list entries that have no data. Remove the example entries if they do not apply.
 - Ignore helper cells such as "For automatic calculation - don't modify", and ignore Excel errors such as #VALUE! (record them in notes).
 - In notes, list anything ambiguous, contradictory (e.g. two different registrations), or that you could not place.
-- Answer with the JSON object only.
+- Answer with the JSON object only: {"kind": ..., "aircraft" or "engine": {...}}.
 
 <workbook>
 ${dump}
@@ -1224,7 +1256,8 @@ ${dump}
     const names = { general: "General", general_extra: "General", engines: "Engines", propellers: "Propellers", landing_gears: "Landing gears",
       inspections: "Inspections", weights: "Weights", options: "Options", avionics: "Avionics", units: "", modules: "", llps: "LLP", parts: "", blades: "Blade",
       manufacturer: "Manufacturer", model: "Model", type: "Type", limit: "Limit", remaining: "Remaining", last: "Last", next: "Next", interval: "Interval",
-      uom: "UOM", value: "Value", text: "Text", ata: "ATA", component: "Component", pn: "P/N", fin: "FIN", esn: "ESN", tso: "TSO", cso: "CSO", tshsi: "TSHSI", tsn: "TSN", csn: "CSN", sn: "S/N" };
+      uom: "UOM", value: "Value", shop_visits: "Shop visits", tslsv: "TSLSV", cslsv: "CSLSV", last_sv_date: "Last shop visit date",
+      last_sv_mro: "Last shop visit MRO", last_sv_workscope: "Workscope", workscope: "Workscope", reason: "Reason", mro: "MRO", thrust: "Rating", status: "Status", location: "Location", module: "Module", text: "Text", ata: "ATA", component: "Component", pn: "P/N", fin: "FIN", esn: "ESN", tso: "TSO", cso: "CSO", tshsi: "TSHSI", tsn: "TSN", csn: "CSN", sn: "S/N" };
     for (const set of [GENERAL, PROP_PART, GEAR]) for (const [k, label] of set) if (!names[k] || names[k] === k) names[k] = label.charAt(0) + label.slice(1).toLowerCase();
     const seg = (k) => (k in names ? names[k] : k);
     const walk = (o, path) => {
@@ -1243,6 +1276,22 @@ ${dump}
   }
 
   /** Make whatever Claude returned safe to build from. */
+  function cleanEngineData(raw) {
+    const d = emptyEngineData();
+    if (!raw || typeof raw !== "object") return d;
+    const str = (v) => (v === null || v === undefined ? "" : String(v));
+    const obj = (o, keys) => Object.fromEntries(keys.map((k) => [k, str(o && o[k])]));
+    const arr = (a) => (Array.isArray(a) ? a.filter((x) => x && typeof x === "object") : []);
+    d.general = obj(raw.general, ENGINE_GENERAL.map(([k]) => k));
+    d.general_extra = arr(raw.general_extra).map((x) => ({ label: up(str(x.label)), value: str(x.value) })).filter((x) => x.label && x.value);
+    d.modules = arr(raw.modules).map((m) => obj(m, ["name", "sn", "tsn", "csn", "tso", "cso"])).filter((m) => m.name);
+    d.llps = arr(raw.llps).map((p) => obj(p, ["module", "part", "pn", "sn", "limit", "csn", "remaining"])).filter((p) => p.part || p.pn);
+    d.shop_visits = arr(raw.shop_visits).map((v) => obj(v, ["date", "mro", "tsn", "csn", "workscope", "reason"])).filter((v) => Object.values(v).some(Boolean));
+    d.options = arr(raw.options).map((o) => ({ text: str(o.text), bold: !!o.bold })).filter((o) => o.text);
+    d.notes = Array.isArray(raw.notes) ? raw.notes.map(str).filter(Boolean) : [];
+    return d;
+  }
+
   function cleanData(raw) {
     const d = emptyData();
     if (!raw || typeof raw !== "object") return d;
@@ -1270,7 +1319,7 @@ ${dump}
     return d;
   }
 
-  root.SpecNormalize = { templateToData, standardSpec, coverage, workbookDump, extractionPrompt, verifyAgainstWorkbook, cleanData, emptyData };
+  root.SpecNormalize = { standardEngineSpec, cleanEngineData, templateToData, standardSpec, coverage, workbookDump, extractionPrompt, verifyAgainstWorkbook, cleanData, emptyData };
 })(typeof window !== "undefined" ? window : globalThis);
 
 </script>
@@ -1421,7 +1470,7 @@ ${dump}
     const drop = h("div", { class: "drop" },
       h("div", { class: "glyph", "aria-hidden": "true" }, "XLSX"),
       h("div", { class: "grow" }, h("strong", {}, "Drop a tech spec workbook here"),
-        h("div", { class: "small muted" }, "A new MSN creates a spec sheet. An MSN already in the fleet gets a new version, and you'll see every value that changed.")),
+        h("div", { class: "small muted" }, "Aircraft and engine workbooks in any layout. A new MSN or ESN creates a spec sheet; one already in the fleet gets a new version, and you'll see every value that changed.")),
       h("button", { class: "btn primary", disabled: !cap.db || !canWrite, onclick: () => pickFile(".xlsx,.xlsm", (f) => importExcel(f)) }, "Upload Excel"));
     if (cap.db && canWrite) {
       drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("over"); });
@@ -1442,7 +1491,7 @@ ${dump}
     $view.replaceChildren(
       h("div", { class: "fleet-head" }, h("div", { class: "grow" }, h("h1", {}, "Fleet spec sheets"),
         h("div", { class: "muted" }, `${fleet.filter((a) => a.kind !== "engine").length} aircraft · ${fleet.filter((a) => a.kind === "engine").length} engines · PDF in the ACIA layout, generated from the latest saved version`)),
-        !canWrite ? h("span", { class: "chip" }, "View only") : h("button", { class: "btn", disabled: !cap.db, onclick: newEngineDialog }, "+ New engine spec sheet")),
+        !canWrite ? h("span", { class: "chip" }, "View only") : null),
       drop, list);
   }
 
@@ -1476,13 +1525,15 @@ ${dump}
       const buf = new Uint8Array(await file.arrayBuffer());
       const { spec, warnings, checks, method } = await readWorkbook(buf, file.name, (msg) => { done(); done = busy(msg); });
       const msn = spec.cover.msn;
-      if (!msn) throw new Error("Couldn't find the aircraft serial number (MSN) in this workbook. Add it to the workbook, or check it's an aircraft tech spec.");
-      const id = intoId || aid(msn);
+      const isEngine = spec.cover.kind === "engine";
+      const idLabel = isEngine ? "ESN" : "MSN";
+      if (!msn) throw new Error(isEngine ? "Couldn't find the engine serial number (ESN) in this workbook." : "Couldn't find the aircraft serial number (MSN) in this workbook. Add it to the workbook and upload it again.");
+      const id = intoId || (isEngine ? "esn-" + String(msn).trim().replace(/[^A-Za-z0-9_.\-]/g, "_") : aid(msn));
       const sumRef = cap.db.doc("aircraft/" + id);
       const sum = await sumRef.get();
       const prev = sum.exists && !sum.data().archived ? await cap.db.doc(`aircraft/${id}/versions/${vid(sum.data().version)}`).get() : null;
       const prevSpec = prev && prev.exists ? prev.data().spec : null;
-      if (intoId && prevSpec && prevSpec.cover.msn && String(prevSpec.cover.msn) !== String(msn)) warnings.unshift(`This workbook is for MSN ${msn}, but you uploaded it to MSN ${prevSpec.cover.msn}.`);
+      if (intoId && prevSpec && prevSpec.cover.msn && String(prevSpec.cover.msn) !== String(msn)) warnings.unshift(`This workbook is for ${idLabel} ${msn}, but you uploaded it to ${prevSpec.cover.kind === "engine" ? "ESN" : "MSN"} ${prevSpec.cover.msn}.`);
 
       // Images in the workbook body (LOPA) become extra pages; identical images are reused, not re-uploaded.
       const imgs = await C.workbookImages(buf).catch(() => []);
@@ -1500,31 +1551,14 @@ ${dump}
       const changes = C.diff(prevSpec, finalSpec);
       await saveVersion(id, finalSpec, "Excel upload", file.name, sum.exists && !sum.data().archived ? sum.data().version : 0);
       done();
-      dialog(prevSpec ? `MSN ${msn} updated` : `MSN ${msn} added`,
-        h("div", {}, h("p", {}, prevSpec ? `Saved as a new version. ${changes.length} value${changes.length === 1 ? "" : "s"} changed since the previous version.` : "A new spec sheet was created from the workbook."),
+      dialog(prevSpec ? `${idLabel} ${msn} updated` : `${idLabel} ${msn} added`,
+        h("div", {}, h("p", {}, prevSpec ? `Saved as a new version. ${changes.length} value${changes.length === 1 ? "" : "s"} changed since the previous version.` : isEngine ? "A new engine spec sheet was created from the workbook." : "A new spec sheet was created from the workbook."),
           method === "claude" ? h("p", { class: "small muted" }, "This workbook isn't in the usual template, so Claude read it into the standard layout. Every value was checked against the workbook's cells.") : null,
           checks && checks.length ? h("div", { class: "warn" }, h("strong", {}, `${checks.length} value${checks.length > 1 ? "s" : ""} Claude returned couldn't be found in the workbook. Check them before sending the PDF out:`),
             h("ul", {}, checks.slice(0, 30).map((x) => h("li", {}, x)))) : null,
           warningsBox(warnings), prevSpec ? changesTable(changes) : null),
         [{ label: "Open spec sheet", cls: "primary", run: () => { if (ws && ws.id === id) openAircraft(id, true); else location.hash = "#ac-" + id; } }]);
     } catch (e) { done(); toast(e.message || String(e), true); }
-  }
-
-  function newEngineDialog() {
-    const v = { model: "", esn: "", year: "" };
-    const field = (label, key, ph) => { const id = fid("ne"); return h("div", { class: "field" }, h("label", { for: id }, label),
-      h("input", { class: "input", id, placeholder: ph, oninput: (e) => (v[key] = e.target.value.trim()) })); };
-    dialog("New engine spec sheet", h("div", {},
-      h("p", { class: "muted" }, "Creates an engine spec sheet with a General Description and an LLP table to fill in. The cover shows the matching engine graphic."),
-      h("div", { class: "grid3" }, field("Engine model", "model", "PW127M"), field("ESN", "esn", "PCE-ED0844"), field("Year of manufacture", "year", "2012"))),
-      [{ label: "Cancel" }, { label: "Create", cls: "primary", run: async () => {
-        if (!v.model || !v.esn) { toast("Enter the engine model and ESN.", true); return false; }
-        const id = "esn-" + v.esn.replace(/[^A-Za-z0-9_.\-]/g, "_");
-        const cur = await cap.db.doc("aircraft/" + id).get();
-        if (cur.exists && !cur.data().archived) { toast(`ESN ${v.esn} already has a spec sheet.`, true); return false; }
-        await saveVersion(id, C.newEngineSpec(v.model, v.esn, v.year), "Created", "", undefined);
-        location.hash = "#ac-" + id;
-      } }]);
   }
 
   /**
@@ -1555,8 +1589,14 @@ ${dump}
           if (e && e.code === "rate_limited") throw new Error("Claude is busy right now. Try the upload again in a minute.");
           throw new Error("Claude couldn't read this workbook: " + (e.message || e.code));
         }
-        data = N.cleanData(raw);
         method = "claude";
+        if (raw && raw.kind === "engine") {
+          const ed = N.cleanEngineData(raw.engine);
+          return { spec: N.standardEngineSpec(ed, filename), method, kind: "engine",
+                   warnings: [...(dump.truncated ? ["The workbook is very large, so only its first part was read."] : []), ...ed.notes.map((n) => "Claude noted: " + n)],
+                   checks: N.verifyAgainstWorkbook(ed, dump.cells) };
+        }
+        data = N.cleanData(raw && raw.aircraft ? raw.aircraft : raw);
         warnings = [...(dump.truncated ? ["The workbook is very large, so only its first part was read."] : []), ...data.notes.map((n) => "Claude noted: " + n)];
         checks = N.verifyAgainstWorkbook(data, dump.cells);
       }
@@ -1748,7 +1788,7 @@ Answer with JSON only: {"summary": "one or two sentences", "ops": [{"op": "...",
       h("option", { value: "aircraft" }, "Aircraft"), h("option", { value: "engine" }, "Engine"));
     kindSel.value = isEngine ? "engine" : "aircraft";
     return h("div", { class: "panel pad" }, h("h2", { style: "margin-bottom:10px" }, "Cover page"),
-      h("div", { class: "grid3" }, f(isEngine ? "Engine model" : "Aircraft model", "model"), f(isEngine ? "ESN" : "Aircraft MSN", "msn"), f("Year of manufacture", "year")),
+      h("div", { class: "grid3" }, f(isEngine ? "Engine model" : "Aircraft model", "model"), f(isEngine ? "ESN" : "Aircraft MSN", "msn"), isEngine ? h("div", {}) : f("Year of manufacture", "year")),
       h("div", { class: "grid2", style: "margin-top:12px" },
         h("div", { class: "field" }, h("label", { for: kindId }, "Spec sheet for"), kindSel),
         isEngine ? h("div", { class: "field" }, h("label", { for: engId }, "Engine illustration (cover)"), engSel)
