@@ -194,12 +194,12 @@
 
   async function importExcel(file, intoId) {
     if (!cap.db) return toast("Sign in to claude.ai to save spec sheets.", true);
-    const done = busy(`Reading ${file.name}…`);
+    let done = busy(`Reading ${file.name}…`);
     try {
       const buf = new Uint8Array(await file.arrayBuffer());
-      const { spec, warnings } = C.importWorkbook(buf, file.name);
+      const { spec, warnings, checks, method } = await readWorkbook(buf, file.name, (msg) => { done(); done = busy(msg); });
       const msn = spec.cover.msn;
-      if (!msn) throw new Error("No AIRCRAFT SERIAL NUMBER found in this workbook. Check it is the tech spec template.");
+      if (!msn) throw new Error("Couldn't find the aircraft serial number (MSN) in this workbook. Add it to the workbook, or check it's an aircraft tech spec.");
       const id = intoId || aid(msn);
       const sumRef = cap.db.doc("aircraft/" + id);
       const sum = await sumRef.get();
@@ -225,6 +225,9 @@
       done();
       dialog(prevSpec ? `MSN ${msn} updated` : `MSN ${msn} added`,
         h("div", {}, h("p", {}, prevSpec ? `Saved as a new version. ${changes.length} value${changes.length === 1 ? "" : "s"} changed since the previous version.` : "A new spec sheet was created from the workbook."),
+          method === "claude" ? h("p", { class: "small muted" }, "This workbook isn't in the usual template, so Claude read it into the standard layout. Every value was checked against the workbook's cells.") : null,
+          checks && checks.length ? h("div", { class: "warn" }, h("strong", {}, `${checks.length} value${checks.length > 1 ? "s" : ""} Claude returned couldn't be found in the workbook. Check them before sending the PDF out:`),
+            h("ul", {}, checks.slice(0, 30).map((x) => h("li", {}, x)))) : null,
           warningsBox(warnings), prevSpec ? changesTable(changes) : null),
         [{ label: "Open spec sheet", cls: "primary", run: () => { if (ws && ws.id === id) openAircraft(id, true); else location.hash = "#ac-" + id; } }]);
     } catch (e) { done(); toast(e.message || String(e), true); }
@@ -245,6 +248,43 @@
         await saveVersion(id, C.newEngineSpec(v.model, v.esn, v.year), "Created", "", undefined);
         location.hash = "#ac-" + id;
       } }]);
+  }
+
+  /**
+   * Any workbook -> the standard spec sheet layout.
+   * The usual ACIA template is read directly; any other layout is read by Claude into the same structure,
+   * and every value Claude returns is checked against the workbook's cells.
+   */
+  async function readWorkbook(buf, filename, status) {
+    const N = window.SpecNormalize;
+    const parsed = C.importWorkbook(buf, filename);
+    let warnings = parsed.warnings, checks = [], method = "template";
+    let data = N.templateToData(parsed.spec);
+    if (N.coverage(data) < 0.6) {
+      if (!cap.sample) {
+        warnings = ["This workbook isn't in the usual template, and Claude isn't available in this view to read it, so many fields will be empty. Fill them in on the spec sheet, or upload from claude.ai.", ...warnings];
+      } else {
+        status("This workbook has a different layout. Claude is reading it into the standard format…");
+        let limits = null;
+        try { limits = await cap.sample.limits(); } catch (_) {}
+        const maxChars = Math.max(20000, ((limits && limits.maxPromptBytes) || 262144) - 12000);
+        const dump = N.workbookDump(buf, maxChars);
+        const tiers = limits && limits.modelTiers;
+        const tier = !tiers || tiers.includes("complex") ? "complex" : "default";
+        let raw;
+        try { raw = await cap.sample.json(N.extractionPrompt(dump.text, filename), { modelTier: tier }); }
+        catch (e) {
+          if (e && e.code === "not_granted") throw new Error("Claude wasn't allowed to read the workbook. Allow it when asked, or use the usual template.");
+          if (e && e.code === "rate_limited") throw new Error("Claude is busy right now. Try the upload again in a minute.");
+          throw new Error("Claude couldn't read this workbook: " + (e.message || e.code));
+        }
+        data = N.cleanData(raw);
+        method = "claude";
+        warnings = [...(dump.truncated ? ["The workbook is very large, so only its first part was read."] : []), ...data.notes.map((n) => "Claude noted: " + n)];
+        checks = N.verifyAgainstWorkbook(data, dump.cells);
+      }
+    }
+    return { spec: N.standardSpec(data, filename), warnings, checks, method };
   }
 
   /** Write a new version and point the aircraft summary at it. expectVersion guards against overwriting someone else's save. */
