@@ -45,3 +45,10 @@ page = "\n".join([
 out = HERE / "spec-sheet-builder.html"
 out.write_text(page)
 print(out, f"{len(page) / 1e6:.2f} MB")
+
+# The same page as a stand-alone document, for ACIA Commercial's framed "Spec sheets" tab (m/specs.html).
+framed = HERE / "embed" / "m" / "specs.html"
+framed.parent.mkdir(parents=True, exist_ok=True)
+framed.write_text('<!doctype html><html lang="en"><head><meta charset="utf-8">'
+                  '<meta name="viewport" content="width=device-width,initial-scale=1"></head><body>' + page + "</body></html>")
+print(framed)

@@ -179,6 +179,18 @@ table.changes td.new { color: var(--ok); font-weight: 600; font-family: var(--mo
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spin { animation-duration: 3s; } }
 
+/* Inside ACIA Commercial (framed as its "Spec sheets" tab, html[data-hub]): the site's band carries the
+   brand, so the masthead becomes a light sub-navigation and the site's colours and type apply. */
+html[data-hub] body::before { display: none; }
+html[data-hub] .mast { position: static; background: var(--surface); color: var(--ink, var(--fg)); border-bottom: 1px solid var(--border, var(--line)); }
+html[data-hub] .mast .inner { height: 46px; }
+html[data-hub] .mast img, html[data-hub] .mast .app { display: none; }
+html[data-hub] .mast nav { margin-left: 0; }
+html[data-hub] .mast nav a { color: var(--ink-soft, var(--muted)); opacity: 1; }
+html[data-hub] .mast nav a[aria-current="page"], html[data-hub] .mast nav a:hover { color: var(--accent-text, var(--accent)); background: var(--accent-soft, var(--field-hover)); }
+html[data-hub] .preview { top: 14px; height: calc(100vh - 28px); }
+html[data-hub] h1, html[data-hub] h2, html[data-hub] h3 { color: var(--ink, var(--heading)); }
+
 @media (max-width: 1050px) {
   .ws { grid-template-columns: minmax(0, 1fr); }
   .preview { position: static; height: 75vh; }
