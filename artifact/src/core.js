@@ -540,7 +540,7 @@
       pageSize: { width: PAGE_W, height: PAGE_H },
       pageMargins: [32, 74, 32, 46],
       info: { title: `MSN ${cover.msn || ""} ${cover.model || ""} - ${settings.doc_title || ""}`, author: settings.company || "" },
-      defaultStyle: { font: "Inter", fontSize: 7.4, color: INK, lineHeight: 1.1 },
+      defaultStyle: { font: assets.fontName || "Inter", fontSize: 7.4, color: INK, lineHeight: 1.1 },
       background: (page) => page === 1 ? { canvas: [
           { type: "rect", x: 0, y: 0, w: PAGE_W, h: PAGE_H, color: SKY },
           { type: "polyline", closePath: true, points: [{ x: 0, y: 0 }, { x: PAGE_W, y: 0 }, { x: PAGE_W, y: PAGE_H * 0.58 }, { x: 0, y: PAGE_H * 0.625 }], color: NAVY },

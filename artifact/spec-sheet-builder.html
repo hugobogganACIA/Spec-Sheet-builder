@@ -738,7 +738,7 @@ table.changes td.new { color: var(--ok); font-weight: 600; font-family: var(--mo
       pageSize: { width: PAGE_W, height: PAGE_H },
       pageMargins: [32, 74, 32, 46],
       info: { title: `MSN ${cover.msn || ""} ${cover.model || ""} - ${settings.doc_title || ""}`, author: settings.company || "" },
-      defaultStyle: { font: "Inter", fontSize: 7.4, color: INK, lineHeight: 1.1 },
+      defaultStyle: { font: assets.fontName || "Inter", fontSize: 7.4, color: INK, lineHeight: 1.1 },
       background: (page) => page === 1 ? { canvas: [
           { type: "rect", x: 0, y: 0, w: PAGE_W, h: PAGE_H, color: SKY },
           { type: "polyline", closePath: true, points: [{ x: 0, y: 0 }, { x: PAGE_W, y: 0 }, { x: PAGE_W, y: PAGE_H * 0.58 }, { x: 0, y: PAGE_H * 0.625 }], color: NAVY },
@@ -854,8 +854,10 @@ table.changes td.new { color: var(--ok); font-weight: 600; font-family: var(--mo
   const DEFAULT_SETTINGS = {
     company: "ACIA Aero Leasing", doc_title: "Specifications & Summary of Terms", confidential: "STRICTLY PRIVATE AND CONFIDENTIAL",
     contacts_heading: "For Additional Summary, Please Contact:", contacts: [], disclaimer: "",
+    font: null, // brand font: {family, normal, bold, italics, bolditalics} -> asset ids
   };
   let settings = clone(DEFAULT_SETTINGS);
+  let settingsLoaded = false;
   let fleet = []; let fleetLoaded = false; let fleetError = "";
 
   const aid = (msn) => "msn-" + String(msn).trim().replace(/[^A-Za-z0-9_.\-]/g, "_");
@@ -873,8 +875,10 @@ table.changes td.new { color: var(--ok); font-weight: 600; font-family: var(--mo
       try { me = await user.id(); } catch (_) { me = null; }
       try { const w = await user.can("data.write"); if (w === false) canWrite = false; } catch (_) {}
     }
+    if (currentRoute() === "prefs") renderSettings();
     if (!db) { fleetError = "Sign in to claude.ai to see and save spec sheets."; fleetLoaded = true; route(); return; }
-    db.doc("config/settings").onSnapshot((s) => { settings = { ...clone(DEFAULT_SETTINGS), ...(s.exists ? s.data() : {}) }; schedulePreview(); }, () => {});
+    db.doc("config/settings").onSnapshot((s) => { settings = { ...clone(DEFAULT_SETTINGS), ...(s.exists ? s.data() : {}) }; applyUiFont(); schedulePreview();
+      if (!settingsLoaded) { settingsLoaded = true; if (currentRoute() === "prefs") renderSettings(); } }, () => {});
     const timer = setTimeout(() => { if (!fleetLoaded) { fleetError = "The spec sheet store isn't answering yet. Your list will appear when it does."; route(); } }, 10000);
     db.collection("aircraft").onSnapshot((snap) => {
       fleet = snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((a) => !a.archived)
@@ -1324,12 +1328,64 @@ Answer with JSON only: {"summary": "one or two sentences", "ops": [{"op": "...",
   }
 
   const FONTS = { Inter: { normal: "Inter-Regular.ttf", bold: "Inter-Bold.ttf", italics: "Inter-Italic.ttf", bolditalics: "Inter-BoldItalic.ttf" } };
+  const FONT_SLOTS = [
+    ["normal", "Regular", "400", "normal"], ["bold", "Bold (Medium or Semibold)", "600", "normal"],
+    ["italics", "Italic", "400", "italic"], ["bolditalics", "Bold italic", "600", "italic"]];
+
+  // Brand font files, fetched once per asset id.
+  const fontCache = new Map();
+  function fontBytes(id) {
+    if (!fontCache.has(id)) fontCache.set(id, fetch("/_blob/" + id).then((r) => (r.ok ? r.arrayBuffer() : null)).catch(() => null));
+    return fontCache.get(id);
+  }
+  function toBase64(buf) {
+    const b = new Uint8Array(buf); let s = "";
+    for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000));
+    return btoa(s);
+  }
+  /** Fonts for pdfmake: the uploaded brand font when there is one, Inter otherwise. Missing styles fall back sensibly. */
+  async function pdfFonts() {
+    const f = settings.font;
+    if (!f || !f.normal) return { fonts: FONTS, vfs: A.fonts, name: "Inter" };
+    const vfs = { ...A.fonts }; const files = {};
+    for (const [slot] of FONT_SLOTS) {
+      if (!f[slot]) continue;
+      const buf = await fontBytes(f[slot]);
+      if (buf) { vfs[`Brand-${slot}`] = toBase64(buf); files[slot] = `Brand-${slot}`; }
+    }
+    if (!files.normal) return { fonts: FONTS, vfs: A.fonts, name: "Inter" };
+    const bold = files.bold || files.normal;
+    return { fonts: { ...FONTS, Brand: { normal: files.normal, bold, italics: files.italics || files.normal, bolditalics: files.bolditalics || bold } }, vfs, name: "Brand" };
+  }
+  /** Use the brand font for the app's own text too. */
+  let uiFontKey = "";
+  async function applyUiFont() {
+    const f = settings.font;
+    const key = f ? FONT_SLOTS.map(([k]) => f[k] || "").join("|") : "";
+    if (key === uiFontKey) return;
+    uiFontKey = key;
+    const root = document.documentElement.style;
+    if (!f || !f.normal) { root.removeProperty("--body"); root.removeProperty("--display"); return; }
+    let any = false;
+    for (const [slot, , weight, style] of FONT_SLOTS) {
+      if (!f[slot]) continue;
+      const buf = await fontBytes(f[slot]);
+      if (!buf) continue;
+      try { const face = new FontFace("ACIA Brand", buf, { weight, style }); await face.load(); document.fonts.add(face); any = true; } catch (_) {}
+    }
+    if (any) {
+      root.setProperty("--body", '"ACIA Brand", "IBM Plex Sans", system-ui, sans-serif');
+      root.setProperty("--display", '"ACIA Brand", "Barlow Semi Condensed", Arial, sans-serif');
+    }
+  }
+
   async function makePdf(spec) {
     const images = {};
     for (const a of spec.attachments || []) if (!a.hidden && a.asset) { const d = await assetDataUrl(a.asset); if (d) images[a.asset] = d; }
-    const dd = C.buildPdf(spec, settings, { logoWhite: A.logoWhite, logoColor: A.logoColor, images });
+    const font = await pdfFonts();
+    const dd = C.buildPdf(spec, settings, { logoWhite: A.logoWhite, logoColor: A.logoColor, images, fontName: font.name });
     return await new Promise((res, rej) => {
-      try { window.pdfMake.createPdf(dd, null, FONTS, A.fonts).getBuffer((buf) => res(new Uint8Array(buf))); } catch (e) { rej(e); }
+      try { window.pdfMake.createPdf(dd, null, font.fonts, font.vfs).getBuffer((buf) => res(new Uint8Array(buf))); } catch (e) { rej(e); }
     });
   }
 
@@ -1381,6 +1437,37 @@ Answer with JSON only: {"summary": "one or two sentences", "ops": [{"op": "...",
   }
 
   // ------------------------------------------------------------ settings
+  function fontPanel(s, ro) {
+    const box = h("div", {});
+    const draw = () => {
+      const f = s.font || {};
+      box.replaceChildren(
+        h("p", { class: "small muted", style: "margin:4px 0 10px" },
+          "The ACIA website uses Canada Type Gibson. Upload the Gibson font files your licence covers (.otf, .ttf or .woff) and the PDFs and this app will use them. ",
+          "Until a Regular file is uploaded, PDFs use Inter. A missing style falls back to the closest one you uploaded."),
+        h("div", { class: "grid2" }, FONT_SLOTS.map(([slot, label]) => h("div", { class: "field" }, h("label", {}, label),
+          h("div", { class: "row", style: "flex-wrap:nowrap" },
+            h("span", { class: f[slot] ? "chip ok" : "chip" }, f[slot] ? "Uploaded" : "Not set"),
+            h("span", { class: "grow small muted mono", style: "overflow:hidden;text-overflow:ellipsis;white-space:nowrap" }, (f.names && f.names[slot]) || ""),
+            ro || !canAssets ? null : h("button", { class: "btn", onclick: () => pickFile(".otf,.ttf,.woff,font/otf,font/ttf,font/woff", async (file) => {
+              const done = busy(`Checking ${file.name}…`);
+              try {
+                const buf = await file.arrayBuffer();
+                try { await new FontFace("probe", buf).load(); } catch (_) { throw new Error(`${file.name} isn't a font file this browser can read.`); }
+                const up = await cap.assets.upload(new Blob([buf], { type: file.type || "font/otf" }));
+                s.font = { family: "Gibson", ...(s.font || {}), [slot]: up.id, names: { ...((s.font && s.font.names) || {}), [slot]: file.name } };
+                done(); draw(); toast(`${label} added. Press Save settings to use it.`);
+              } catch (e) { done(); toast(e.message || "Couldn't upload that font.", true); }
+            }) }, f[slot] ? "Replace" : "Upload"),
+            ro || !f[slot] ? null : h("button", { class: "btn ghost", "aria-label": `Remove ${label}`, onclick: () => {
+              const next = { ...s.font }; delete next[slot]; next.names = { ...(next.names || {}) }; delete next.names[slot];
+              s.font = FONT_SLOTS.some(([k]) => next[k]) ? next : null; draw(); } }, "✕"))))),
+        !canAssets && !ro ? h("p", { class: "small muted" }, "Only editors of this artifact can upload font files.") : "");
+    };
+    draw();
+    return h("div", { class: "panel pad" }, h("h2", {}, "Brand font"), box);
+  }
+
   function renderSettings() {
     const s = clone(settings);
     const ro = !canWrite || !cap.db;
@@ -1401,6 +1488,7 @@ Answer with JSON only: {"summary": "one or two sentences", "ops": [{"op": "...",
           h("div", { class: "grid2" }, f("Company name", "company"), f("Document title", "doc_title"), f("Confidentiality line", "confidential"), f("Contacts heading on the cover", "contacts_heading"))),
         h("div", { class: "panel pad" }, h("h2", {}, "Cover contacts"), h("p", { class: "small muted" }, "The first contact sits on its own line; the rest go two per row."), box),
         h("div", { class: "panel pad" }, h("h2", { style: "margin-bottom:10px" }, "Cover disclaimer"), f("Disclaimer text", "disclaimer", true)),
+        fontPanel(s, ro),
         ro ? h("p", { class: "muted" }, "You can view these settings but not change them.") : h("div", {}, h("button", { class: "btn primary", onclick: async () => {
           try { await cap.db.doc("config/settings").set(s); toast("Settings saved. Every PDF uses them from now on."); } catch (e) { toast("Couldn't save settings: " + (e.message || e.code), true); }
         } }, "Save settings"))));
