@@ -76,6 +76,7 @@
   const DEFAULT_SETTINGS = {
     company: "ACIA Aero Leasing", doc_title: "Specifications & Summary of Terms", confidential: "STRICTLY PRIVATE AND CONFIDENTIAL",
     contacts_heading: "For Additional Summary, Please Contact:", contacts: [], disclaimer: "",
+    stale_days: 90, // flag data older than this many days
     font: null, // brand font: {family, normal, bold, italics, bolditalics} -> asset ids
   };
   let settings = clone(DEFAULT_SETTINGS);
@@ -158,7 +159,10 @@
     else list = h("div", { class: "fleet" }, fleet.map((a) => h("button", { class: "tail", onclick: () => (location.hash = "#ac-" + a.id) },
       h("div", { class: "top" }, h("span", { class: "msn feature-name" }, a.kind === "engine" ? h("span", { style: "font-size:13px;opacity:.75" }, "ESN ") : null, a.msn), h("span", { class: "model" }, a.model || ""), a.registration ? h("span", { class: "reg" }, a.registration) : null),
       h("dl", {},
-        h("dt", {}, "Info date"), h("dd", {}, a.info_date || "–"),
+        h("dt", {}, "Info date"), h("dd", {}, a.info_date || "–", (() => {
+          const days = window.SpecChecks.dataAgeDays(a.info_date);
+          return days !== null && days > (settings.stale_days || 90) ? h("span", { class: "chip stale", title: "Hours, cycles and remaining figures will have moved on" }, ` ${days} days old`) : null;
+        })()),
         h("dt", {}, "Version"), h("dd", {}, `v${a.version || 1}`),
         h("dt", {}, "Updated"), h("dd", {}, when(a.updated_at)),
         h("dt", {}, "Last change"), h("dd", {}, a.last_change || "")))));
@@ -329,6 +333,33 @@
     const c = document.getElementById("state-chip"); if (c) { c.className = "chip dirty"; c.textContent = "Unsaved"; }
     for (const id of ["save-btn", "discard-btn"]) { const b = document.getElementById(id); if (b) b.disabled = false; }
     schedulePreview();
+    clearTimeout(checksTimer);
+    checksTimer = setTimeout(() => { const el = document.getElementById("checks"); if (el && ws) el.replaceChildren(checksPanel(!canWrite)); }, 700);
+  }
+  let checksTimer = null;
+
+  const runChecks = (spec) => window.SpecChecks.run(spec, { staleDays: settings.stale_days || 90 });
+
+  /** Pre-send checks: data problems, recalculated figures, data age. */
+  function checksPanel(ro) {
+    const issues = runChecks(ws.spec);
+    const n = (lvl) => issues.filter((i) => i.level === lvl).length;
+    const fixable = issues.filter((i) => i.fix);
+    const applyFixes = (list) => { for (const i of list) window.SpecChecks.applyFix(ws.spec, i.fix); renderWorkspace(); markDirty(); toast(`${list.length} figure${list.length > 1 ? "s" : ""} recalculated. Review, then Save.`); };
+    const lvlChip = (l) => h("span", { class: `chip lvl-${l}` }, { error: "Fix", warn: "Check", info: "Note" }[l]);
+    const details = h("details", { class: "checks-body" }, h("summary", {}, issues.length ? "Show checks" : "No problems found"),
+      h("div", { class: "checks-list" }, issues.map((i) => h("div", { class: "check-row" }, lvlChip(i.level),
+        h("span", { class: "small muted check-group" }, i.group), h("span", { class: "grow" }, i.text),
+        i.fix && !ro ? h("button", { class: "btn", onclick: () => applyFixes([i]) }, "Use calculated value") : null))));
+    if (n("error")) details.open = true;
+    return h("div", { class: "panel pad checks" + (n("error") ? " has-errors" : "") },
+      h("div", { class: "row" }, h("h2", { class: "grow" }, "Checks before sending"),
+        n("error") ? h("span", { class: "chip lvl-error" }, `${n("error")} to fix`) : null,
+        n("warn") ? h("span", { class: "chip lvl-warn" }, `${n("warn")} to check`) : null,
+        !issues.length ? h("span", { class: "chip ok" }, "All clear") : null,
+        fixable.length && !ro ? h("button", { class: "btn", onclick: () => applyFixes(fixable) }, `Recalculate all (${fixable.length})`) : null),
+      h("p", { class: "small muted", style: "margin:4px 0 6px" }, "Derived figures (remaining, calendar consumed, next due, A/C age) are recalculated from the information date and compared with the sheet."),
+      details);
   }
 
   const kvValue = (spec, label) => { for (const s of spec.sections) if (s.type === "kv") for (const r of s.rows) if ((r.label || "").toUpperCase() === label) return r.value; return ""; };
@@ -351,7 +382,7 @@
       h("button", { class: "btn sky", onclick: downloadPdf }, "Download PDF"),
       ro ? null : h("button", { class: "btn ghost", "aria-label": "More actions", onclick: moreActions }, "•••"));
 
-    const editor = h("div", { class: "editor" }, ro ? null : askBox(), coverPanel(ro), s.sections.map((sec, i) => sectionPanel(sec, i, ro)), ro ? null : addBar(), attachmentsPanel(ro));
+    const editor = h("div", { class: "editor" }, ro ? null : askBox(), h("div", { id: "checks" }, checksPanel(ro)), coverPanel(ro), s.sections.map((sec, i) => sectionPanel(sec, i, ro)), ro ? null : addBar(), attachmentsPanel(ro));
     const preview = h("div", { class: "preview" },
       h("div", { class: "bar" }, h("h2", {}, "PDF preview"), h("span", { id: "pv-state", class: "small muted" }), h("span", { class: "grow" }),
         h("button", { class: "btn ghost", onclick: () => { ws.showPreview = false; renderWorkspace(); } }, "Hide")),
@@ -707,10 +738,22 @@ Answer with JSON only: {"summary": "one or two sentences", "ops": [{"op": "...",
   }
 
   const pdfName = (spec) => `MSN ${spec.cover.msn || ""} Spec - ${new Date().toLocaleDateString("en-GB", { month: "short", year: "2-digit" })}.pdf`.replace(/[^\w .\-]/g, "");
-  async function downloadPdf(spec) {
+  async function downloadPdf(spec, opts) {
     spec = spec && spec.sections ? spec : ws.spec;
-    if (ws && spec === ws.spec && ws.dirty) toast("This PDF includes your unsaved edits. Save them so the fleet list matches.");
     if (!cap.downloads) return toast("Downloads aren't available in this view. Open the artifact on claude.ai to download the PDF.", true);
+    if (!opts || !opts.skipChecks) {
+      const issues = runChecks(spec).filter((i) => i.level !== "info");
+      if (issues.length) {
+        const errors = issues.filter((i) => i.level === "error").length;
+        dialog("Before you send this", h("div", {},
+          h("p", {}, errors ? `${errors} problem${errors > 1 ? "s" : ""} and ${issues.length - errors} thing${issues.length - errors === 1 ? "" : "s"} to check on this spec sheet:` : `${issues.length} thing${issues.length > 1 ? "s" : ""} to check on this spec sheet:`),
+          h("div", { class: "changes-wrap" }, h("ul", { class: "small" }, issues.slice(0, 15).map((i) => h("li", {}, i.text)))),
+          issues.length > 15 ? h("p", { class: "small muted" }, `…and ${issues.length - 15} more in Checks before sending.`) : null),
+          [{ label: "Review first" }, { label: "Download anyway", cls: "primary", run: () => { downloadPdf(spec, { skipChecks: true }); } }]);
+        return;
+      }
+    }
+    if (ws && spec === ws.spec && ws.dirty) toast("This PDF includes your unsaved edits. Save them so the fleet list matches.");
     const done = busy("Building PDF…");
     try {
       const bytes = await makePdf(spec);
@@ -760,8 +803,8 @@ Answer with JSON only: {"summary": "one or two sentences", "ops": [{"op": "...",
       const f = s.font || {};
       box.replaceChildren(
         h("p", { class: "small muted", style: "margin:4px 0 10px" },
-          "The ACIA website uses Canada Type Gibson. Upload the Gibson font files your licence covers (.otf, .ttf or .woff) and the PDFs and this app will use them. ",
-          "Until a Regular file is uploaded, PDFs and the app use Archivo. A missing style falls back to the closest one you uploaded."),
+          "The brand font is Archivo, the typeface on the ACIA website. It is built in: body text in Archivo Regular, headings in Archivo SemiBold at a slightly wider width, and cover names in Archivo Bold at the widest width. ",
+          "Only upload files here to replace Archivo with a different typeface; leave all four empty to keep Archivo."),
         h("div", { class: "grid2" }, FONT_SLOTS.map(([slot, label]) => h("div", { class: "field" }, h("label", {}, label),
           h("div", { class: "row", style: "flex-wrap:nowrap" },
             h("span", { class: f[slot] ? "chip ok" : "chip" }, f[slot] ? "Uploaded" : "Not set"),
@@ -802,7 +845,9 @@ Answer with JSON only: {"summary": "one or two sentences", "ops": [{"op": "...",
     $view.replaceChildren(h("div", { class: "fleet-head" }, h("div", { class: "grow" }, h("h1", {}, "Settings"), h("div", { class: "muted" }, "Used on every spec sheet PDF."))),
       h("div", { class: "editor" },
         h("div", { class: "panel pad" }, h("h2", { style: "margin-bottom:10px" }, "Header and footer"),
-          h("div", { class: "grid2" }, f("Company name", "company"), f("Document title", "doc_title"), f("Confidentiality line", "confidential"), f("Contacts heading on the cover", "contacts_heading"))),
+          h("div", { class: "grid2" }, f("Company name", "company"), f("Document title", "doc_title"), f("Confidentiality line", "confidential"), f("Contacts heading on the cover", "contacts_heading"),
+            (() => { const id = fid("st"); return h("div", { class: "field" }, h("label", { for: id }, "Flag data older than (days)"),
+              h("input", { class: "input", id, type: "number", min: "1", value: s.stale_days || 90, disabled: ro, oninput: (e) => (s.stale_days = Math.max(1, parseInt(e.target.value, 10) || 90)) })); })())),
         h("div", { class: "panel pad" }, h("h2", {}, "Cover contacts"), h("p", { class: "small muted" }, "The first contact sits on its own line; the rest go two per row."), box),
         h("div", { class: "panel pad" }, h("h2", { style: "margin-bottom:10px" }, "Cover disclaimer"), f("Disclaimer text", "disclaimer", true)),
         fontPanel(s, ro),

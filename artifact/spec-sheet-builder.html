@@ -157,6 +157,15 @@ table.changes td.old { color: var(--danger); text-decoration: line-through; font
 table.changes td.new { color: var(--ok); font-weight: 600; font-family: var(--mono); font-size: 12px; }
 .warn { background: var(--warn-bg); border: 1px solid var(--warn-line); color: var(--warn-fg); border-radius: var(--radius); padding: 10px 12px; font-size: 13px; margin-top: 10px; }
 .warn ul { margin: 6px 0 0; padding-left: 18px; }
+.checks.has-errors { border-color: var(--danger); }
+.checks-body summary { cursor: pointer; font-size: 13px; color: var(--accent); font-weight: 500; }
+.checks-list { margin-top: 8px; display: flex; flex-direction: column; }
+.check-row { display: flex; gap: 10px; align-items: center; padding: 7px 0; border-top: 1px solid var(--line); flex-wrap: wrap; font-size: 13px; }
+.check-group { width: 88px; flex: none; }
+.chip.lvl-error { background: var(--danger); color: #ffffff; }
+.chip.lvl-warn { background: var(--warn-bg); color: var(--warn-fg); border: 1px solid var(--warn-line); }
+.chip.lvl-info { background: var(--surface-2); color: var(--muted); }
+.chip.stale { background: var(--warn-bg); color: var(--warn-fg); margin-left: 6px; text-transform: none; letter-spacing: 0; font-family: var(--body); }
 .hist { display: flex; gap: 10px; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
 .hist .when { width: 140px; font-size: 12px; color: var(--muted); }
 .contact { display: grid; grid-template-columns: 1fr 1fr 1.3fr 1fr auto; gap: 6px; margin-bottom: 6px; }
@@ -1329,6 +1338,220 @@ ${dump}
 
 </script>
 <script>
+/* ===== Pre-send checks: data problems, recalculated figures, stale data =====
+   SpecChecks.run(spec, {today, staleDays}) -> [{level, group, text, fix?}]
+   level: "error" (must look at) | "warn" (should look at) | "info"
+   fix:   {s, r, c, value}  section index, row index, cell index (-1 = a Fields row's value) and the corrected value. */
+(function (root) {
+  "use strict";
+  const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+  const ERR = /^#(VALUE!|REF!|DIV\/0!|N\/A|NAME\?|NUM!|NULL!|ERROR)/i;
+  const up = (s) => String(s || "").toUpperCase();
+  const DAY = 86400000, MONTH_DAYS = 30.4375;
+
+  // ---------------------------------------------------------------- parsing and formatting
+  function parseDate(s) {
+    s = String(s || "").trim();
+    let m = s.match(/^(\d{1,2})[\s\-\/.]([A-Za-z]{3})[A-Za-z]*[\s\-\/.,]+(\d{2}|\d{4})$/);
+    if (m) {
+      const mon = MONTHS.indexOf(m[2].toLowerCase());
+      if (mon < 0) return null;
+      const y = m[3].length === 2 ? 2000 + +m[3] : +m[3];
+      return Date.UTC(y, mon, +m[1]);
+    }
+    m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    if (m) return Date.UTC(+m[1], +m[2] - 1, +m[3]);
+    m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/); // day/month/year, as in European sheets
+    if (m) { const y = m[3].length === 2 ? 2000 + +m[3] : +m[3]; return Date.UTC(y, +m[2] - 1, +m[1]); }
+    return null;
+  }
+  const fmtDate = (t) => { const d = new Date(t); return `${String(d.getUTCDate()).padStart(2, "0")} ${MONTHS[d.getUTCMonth()].replace(/^./, (c) => c.toUpperCase())} ${d.getUTCFullYear()}`; };
+
+  /** "25,000 FHs" -> {n: 25000, decimals: 0, commas: true, suffix: " FHs"}; null for "-", "*", "TBD"... */
+  function parseNum(s) {
+    const t = String(s || "").trim().replace(/^[–—]/, "-");
+    const m = t.match(/^(-?)\s*(\d[\d,]*)(?:\.(\d*))?\s*([A-Za-z].*)?$/);
+    if (!m) return null;
+    const n = parseFloat(`${m[1]}${m[2].replace(/,/g, "")}.${m[3] || "0"}`);
+    return { n, decimals: (m[3] || "").length, commas: m[2].includes(","), suffix: m[4] ? " " + m[4].trim() : "" };
+  }
+  function fmtLike(n, like, defaults) {
+    const d = like || defaults || { decimals: 0, commas: true, suffix: "" };
+    let s = Math.abs(n).toFixed(d.decimals);
+    if (d.commas || Math.abs(n) >= 10000) { const [i, f] = s.split("."); s = i.replace(/\B(?=(\d{3})+(?!\d))/g, ",") + (f !== undefined ? "." + f : ""); }
+    return (n < 0 ? "-" : "") + s + (d.suffix || "");
+  }
+  const monthsBetween = (a, b) => (b - a) / DAY / MONTH_DAYS;
+  function addMonths(t, months) {
+    const d = new Date(t);
+    const whole = Math.trunc(months);
+    return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + whole, d.getUTCDate());
+  }
+
+  // ---------------------------------------------------------------- the checks
+  function run(spec, opts) {
+    const today = (opts && opts.today) || Date.now();
+    const staleDays = (opts && opts.staleDays) || 90;
+    const out = [];
+    const sections = spec.sections || [];
+    const isEngine = spec.cover && spec.cover.kind === "engine";
+    let heading = "";
+    const nameOf = [];
+    sections.forEach((s, i) => { if (s.type === "heading") heading = s.title || ""; nameOf[i] = s.title || heading || "Section"; });
+
+    const kvGet = (re) => {
+      for (let i = 0; i < sections.length; i++) { const s = sections[i]; if (s.type !== "kv") continue;
+        for (let r = 0; r < s.rows.length; r++) if (re.test(up(s.rows[r].label))) return { s: i, r, value: s.rows[r].value || "" }; }
+      return null;
+    };
+    const infoRow = kvGet(/INFORMATION DATE|STATUS DATE|SITUATION DATE/);
+    const asOf = infoRow ? parseDate(infoRow.value) : null;
+
+    // --- 1. data problems
+    let tbd = 0;
+    sections.forEach((s, i) => {
+      const cells = s.type === "kv" ? s.rows.map((r, ri) => ({ v: r.value, ri, ci: -1, label: r.label }))
+        : s.type === "grid" ? s.rows.flatMap((r, ri) => r.cells.map((v, ci) => ({ v, ri, ci, label: `${r.label} › ${s.columns[ci] || ""}` }))) : [];
+      const errs = [];
+      for (const c of cells) {
+        const v = String(c.v || "").trim();
+        if (ERR.test(v)) errs.push(c);
+        if (/^(TBD|TBA)$/i.test(v)) tbd++;
+      }
+      if (errs.length === 1) out.push({ level: "error", group: "Data", text: `${nameOf[i]} › ${errs[0].label}: Excel error ${errs[0].v}` });
+      else if (errs.length > 1) {
+        const rows = [...new Set(errs.map((c) => (s.type === "grid" ? (s.rows[c.ri].cells[0] && !ERR.test(s.rows[c.ri].cells[0]) ? s.rows[c.ri].cells[0] : `row ${c.ri + 1}`) : s.rows[c.ri].label)))];
+        out.push({ level: "error", group: "Data", text: `${nameOf[i]}: ${errs.length} cells show Excel errors (${[...new Set(errs.map((c) => String(c.v).trim()))].join(", ")}) in ${rows.slice(0, 8).join(", ")}${rows.length > 8 ? "…" : ""}` });
+      }
+      if (s.type === "kv" && /GENERAL/.test(up(s.title))) for (const r of s.rows) if (!String(r.value || "").trim())
+        out.push({ level: "warn", group: "Data", text: `General Description › ${r.label} is empty` });
+      if (s.type === "grid" && /AVIONIC/.test(up(s.title))) s.rows.forEach((r) => {
+        if (parseNum(r.cells[0]) && /^[\d.,\s-]+$/.test(String(r.cells[0]))) out.push({ level: "warn", group: "Data", text: `Avionics: component name "${r.cells[0]}" is a number (ATA ${r.label}), probably a broken formula` });
+      });
+    });
+    if (tbd) out.push({ level: "info", group: "Data", text: `${tbd} value${tbd > 1 ? "s are" : " is"} still TBD or TBA` });
+    const serial = kvGet(isEngine ? /ENGINE SERIAL|^ESN$/ : /AIRCRAFT SERIAL|^MSN$/);
+    if (serial && serial.value && spec.cover && spec.cover.msn && String(serial.value).trim() !== String(spec.cover.msn).trim())
+      out.push({ level: "error", group: "Data", text: `The cover says ${isEngine ? "ESN" : "MSN"} ${spec.cover.msn} but the General Description says ${serial.value}` });
+
+    // --- 3. stale data
+    if (!infoRow || !infoRow.value) out.push({ level: "warn", group: "Data age", text: "No information date, so readers can't tell how current the figures are" });
+    else if (asOf === null) out.push({ level: "info", group: "Data age", text: `Information date "${infoRow.value}" isn't a date the app can read, so derived figures weren't recalculated` });
+    else {
+      const age = Math.floor((today - asOf) / DAY);
+      if (age > staleDays) out.push({ level: "warn", group: "Data age", text: `The data is ${age} days old (information date ${infoRow.value}). Hours, cycles and remaining figures will have moved on since then.` });
+      if (age < -1) out.push({ level: "warn", group: "Data age", text: `The information date ${infoRow.value} is in the future` });
+    }
+
+    // --- 2. recalculated figures (all relative to the information date)
+    const calc = (i, ri, ci, label, stated, computed, like, tol, defaults) => {
+      if (Math.abs(stated.n - computed) <= tol) return;
+      out.push({ level: "warn", group: "Calculations", text: `${nameOf[i]} › ${label}: shows ${fmtLike(stated.n, stated)}, should be ${fmtLike(computed, like, defaults)}`,
+                 fix: { s: i, r: ri, c: ci, value: fmtLike(computed, like, defaults) } });
+    };
+    const overdue = (i, label, p) => { if (p && p.n < 0) out.push({ level: "error", group: "Overdue", text: `${nameOf[i]} › ${label}: ${fmtLike(p.n, p)} remaining (overdue or expired)` }); };
+
+    if (asOf !== null) {
+      const dom = kvGet(/DATE OF MANUFACTURE/), age = kvGet(/AGE/);
+      const domT = dom ? parseDate(dom.value) : null, ageP = age ? parseNum(age.value) : null;
+      if (domT !== null && ageP) {
+        const years = (asOf - domT) / DAY / 365.25;
+        if (Math.abs(years - ageP.n) > 0.05) out.push({ level: "warn", group: "Calculations", text: `A/C age: shows ${age.value}, should be ${years.toFixed(2)} at the information date`,
+          fix: { s: age.s, r: age.r, c: -1, value: years.toFixed(2) } });
+      }
+    }
+    const tt = kvGet(/TOTAL TIME|AIRFRAME.*HOURS/), tc = kvGet(/TOTAL CYCLES/);
+    const ttN = tt ? parseNum(tt.value) : null, tcN = tc ? parseNum(tc.value) : null;
+    const months = { decimals: 2, commas: false, suffix: " mths" };
+
+    sections.forEach((s, i) => {
+      if (s.type !== "grid") return;
+      const title = up(s.title);
+      // Life-limited parts: Remaining = Limit - used
+      if (/LIFE|LLP|ROTABLE/.test(title)) {
+        const cols = (re) => s.columns.map((c, ci) => (re.test(up(c)) ? ci : -1)).filter((ci) => ci >= 0);
+        const L = cols(/LIMIT/), U = cols(/CSN|TSN|USED/), R = cols(/REMAIN/);
+        s.rows.forEach((r, ri) => R.forEach((rc, k) => {
+          const lim = parseNum(r.cells[L[k]]), used = parseNum(r.cells[U[k]]), rem = parseNum(r.cells[rc]);
+          overdue(i, `${r.label} › ${s.columns[rc]}`, rem);
+          if (lim && used && rem) calc(i, ri, rc, `${r.label} remaining`, rem, lim.n - used.n, rem, 1.5);
+        }));
+        return;
+      }
+      // Scheduled inspections: remaining to the next due point
+      if (/INSPECTION|CHECK/.test(title)) {
+        const col = (re) => s.columns.findIndex((c) => re.test(up(c)));
+        const cNext = col(/NEXT/), cRem = col(/REMAIN/), cUom = col(/UOM|UNIT/);
+        if (cRem < 0) return;
+        s.rows.forEach((r, ri) => {
+          const rem = parseNum(r.cells[cRem]);
+          overdue(i, r.label, rem);
+          if (!rem || cNext < 0) return;
+          const uom = up(cUom >= 0 ? r.cells[cUom] : r.cells[cRem]);
+          if (/MONTH|MTH/.test(uom) && asOf !== null) {
+            const next = parseDate(r.cells[cNext]);
+            if (next !== null) calc(i, ri, cRem, `${r.label} remaining`, rem, monthsBetween(asOf, next), rem, 1);
+          } else if (/FH|HOUR|HRS/.test(uom) && ttN) {
+            const next = parseNum(r.cells[cNext]); if (next) calc(i, ri, cRem, `${r.label} remaining`, rem, next.n - ttN.n, rem, 1);
+          } else if (/CYC|FC/.test(uom) && tcN) {
+            const next = parseNum(r.cells[cNext]); if (next) calc(i, ri, cRem, `${r.label} remaining`, rem, next.n - tcN.n, rem, 1);
+          }
+        });
+        return;
+      }
+      // Unit tables (propellers, blades, landing gear): one column per component, one row per field
+      const row = (re, not) => s.rows.findIndex((r) => re.test(up(r.label)) && !(not && not.test(up(r.label))));
+      const rInst = row(/INSTALL|LAST OV/), rCal = row(/CALENDAR/), rLimM = row(/LIMIT.*(MNTH|MONTH)|^OVERHAUL LIMIT$/),
+            rRemM = row(/REMAINING.*(MNTH|MONTH)/), rLimH = row(/LIMIT.*(FH|HRS)/), rRemH = row(/REMAINING.*(FH|HRS)|REMAINING TO OV/),
+            rTso = row(/TSO|TIME SINCE OVERHAUL/), rNext = row(/NEXT/);
+      s.columns.forEach((colName, ci) => {
+        const cell = (ri) => (ri >= 0 ? s.rows[ri].cells[ci] : "");
+        const label = (ri) => `${colName} › ${s.rows[ri].label}`;
+        overdue(i, rRemM >= 0 ? label(rRemM) : "", rRemM >= 0 ? parseNum(cell(rRemM)) : null);
+        overdue(i, rRemH >= 0 ? label(rRemH) : "", rRemH >= 0 ? parseNum(cell(rRemH)) : null);
+        const inst = rInst >= 0 ? parseDate(cell(rInst)) : null;
+        let consumed = null;
+        if (inst !== null && asOf !== null) {
+          consumed = monthsBetween(inst, asOf);
+          const cal = rCal >= 0 ? parseNum(cell(rCal)) : null;
+          if (cal) calc(i, rCal, ci, label(rCal), cal, consumed, cal, 0.5, months);
+        }
+        const limM = rLimM >= 0 ? parseNum(cell(rLimM)) : null, remM = rRemM >= 0 ? parseNum(cell(rRemM)) : null;
+        if (limM && remM && consumed !== null) calc(i, rRemM, ci, label(rRemM), remM, limM.n - consumed, remM, 0.5, months);
+        if (limM && inst !== null && rNext >= 0) {
+          const next = parseDate(cell(rNext)), due = addMonths(inst, limM.n);
+          if (next !== null && Math.abs(next - due) > 31 * DAY)
+            out.push({ level: "warn", group: "Calculations", text: `${nameOf[i]} › ${label(rNext)}: shows ${cell(rNext)}, should be ${fmtDate(due)} (${limM.n} months after ${cell(rInst)})`,
+                       fix: { s: i, r: rNext, c: ci, value: fmtDate(due) } });
+        }
+        const limH = rLimH >= 0 ? parseNum(cell(rLimH)) : null, remH = rRemH >= 0 ? parseNum(cell(rRemH)) : null, tso = rTso >= 0 ? parseNum(cell(rTso)) : null;
+        if (limH && remH && tso) calc(i, rRemH, ci, label(rRemH), remH, limH.n - tso.n, remH, 1);
+      });
+    });
+
+    const rank = { error: 0, warn: 1, info: 2 };
+    return out.sort((a, b) => rank[a.level] - rank[b.level]);
+  }
+
+  /** Apply one fix to a spec (mutates it). */
+  function applyFix(spec, fix) {
+    const s = spec.sections[fix.s];
+    if (!s) return;
+    if (fix.c === -1 && s.rows[fix.r]) s.rows[fix.r].value = fix.value;
+    else if (s.rows[fix.r]) s.rows[fix.r].cells[fix.c] = fix.value;
+  }
+
+  /** Days since an information date string, or null. */
+  function dataAgeDays(infoDate, today) {
+    const t = parseDate(infoDate);
+    return t === null ? null : Math.floor(((today || Date.now()) - t) / DAY);
+  }
+
+  root.SpecChecks = { run, applyFix, dataAgeDays, parseDate, parseNum };
+})(typeof window !== "undefined" ? window : globalThis);
+
+</script>
+<script>
 /* ===== Spec Sheet Builder: UI, storage (db + assets), preview, download, AI changes ===== */
 (function () {
   "use strict";
@@ -1407,6 +1630,7 @@ ${dump}
   const DEFAULT_SETTINGS = {
     company: "ACIA Aero Leasing", doc_title: "Specifications & Summary of Terms", confidential: "STRICTLY PRIVATE AND CONFIDENTIAL",
     contacts_heading: "For Additional Summary, Please Contact:", contacts: [], disclaimer: "",
+    stale_days: 90, // flag data older than this many days
     font: null, // brand font: {family, normal, bold, italics, bolditalics} -> asset ids
   };
   let settings = clone(DEFAULT_SETTINGS);
@@ -1489,7 +1713,10 @@ ${dump}
     else list = h("div", { class: "fleet" }, fleet.map((a) => h("button", { class: "tail", onclick: () => (location.hash = "#ac-" + a.id) },
       h("div", { class: "top" }, h("span", { class: "msn feature-name" }, a.kind === "engine" ? h("span", { style: "font-size:13px;opacity:.75" }, "ESN ") : null, a.msn), h("span", { class: "model" }, a.model || ""), a.registration ? h("span", { class: "reg" }, a.registration) : null),
       h("dl", {},
-        h("dt", {}, "Info date"), h("dd", {}, a.info_date || "–"),
+        h("dt", {}, "Info date"), h("dd", {}, a.info_date || "–", (() => {
+          const days = window.SpecChecks.dataAgeDays(a.info_date);
+          return days !== null && days > (settings.stale_days || 90) ? h("span", { class: "chip stale", title: "Hours, cycles and remaining figures will have moved on" }, ` ${days} days old`) : null;
+        })()),
         h("dt", {}, "Version"), h("dd", {}, `v${a.version || 1}`),
         h("dt", {}, "Updated"), h("dd", {}, when(a.updated_at)),
         h("dt", {}, "Last change"), h("dd", {}, a.last_change || "")))));
@@ -1660,6 +1887,33 @@ ${dump}
     const c = document.getElementById("state-chip"); if (c) { c.className = "chip dirty"; c.textContent = "Unsaved"; }
     for (const id of ["save-btn", "discard-btn"]) { const b = document.getElementById(id); if (b) b.disabled = false; }
     schedulePreview();
+    clearTimeout(checksTimer);
+    checksTimer = setTimeout(() => { const el = document.getElementById("checks"); if (el && ws) el.replaceChildren(checksPanel(!canWrite)); }, 700);
+  }
+  let checksTimer = null;
+
+  const runChecks = (spec) => window.SpecChecks.run(spec, { staleDays: settings.stale_days || 90 });
+
+  /** Pre-send checks: data problems, recalculated figures, data age. */
+  function checksPanel(ro) {
+    const issues = runChecks(ws.spec);
+    const n = (lvl) => issues.filter((i) => i.level === lvl).length;
+    const fixable = issues.filter((i) => i.fix);
+    const applyFixes = (list) => { for (const i of list) window.SpecChecks.applyFix(ws.spec, i.fix); renderWorkspace(); markDirty(); toast(`${list.length} figure${list.length > 1 ? "s" : ""} recalculated. Review, then Save.`); };
+    const lvlChip = (l) => h("span", { class: `chip lvl-${l}` }, { error: "Fix", warn: "Check", info: "Note" }[l]);
+    const details = h("details", { class: "checks-body" }, h("summary", {}, issues.length ? "Show checks" : "No problems found"),
+      h("div", { class: "checks-list" }, issues.map((i) => h("div", { class: "check-row" }, lvlChip(i.level),
+        h("span", { class: "small muted check-group" }, i.group), h("span", { class: "grow" }, i.text),
+        i.fix && !ro ? h("button", { class: "btn", onclick: () => applyFixes([i]) }, "Use calculated value") : null))));
+    if (n("error")) details.open = true;
+    return h("div", { class: "panel pad checks" + (n("error") ? " has-errors" : "") },
+      h("div", { class: "row" }, h("h2", { class: "grow" }, "Checks before sending"),
+        n("error") ? h("span", { class: "chip lvl-error" }, `${n("error")} to fix`) : null,
+        n("warn") ? h("span", { class: "chip lvl-warn" }, `${n("warn")} to check`) : null,
+        !issues.length ? h("span", { class: "chip ok" }, "All clear") : null,
+        fixable.length && !ro ? h("button", { class: "btn", onclick: () => applyFixes(fixable) }, `Recalculate all (${fixable.length})`) : null),
+      h("p", { class: "small muted", style: "margin:4px 0 6px" }, "Derived figures (remaining, calendar consumed, next due, A/C age) are recalculated from the information date and compared with the sheet."),
+      details);
   }
 
   const kvValue = (spec, label) => { for (const s of spec.sections) if (s.type === "kv") for (const r of s.rows) if ((r.label || "").toUpperCase() === label) return r.value; return ""; };
@@ -1682,7 +1936,7 @@ ${dump}
       h("button", { class: "btn sky", onclick: downloadPdf }, "Download PDF"),
       ro ? null : h("button", { class: "btn ghost", "aria-label": "More actions", onclick: moreActions }, "•••"));
 
-    const editor = h("div", { class: "editor" }, ro ? null : askBox(), coverPanel(ro), s.sections.map((sec, i) => sectionPanel(sec, i, ro)), ro ? null : addBar(), attachmentsPanel(ro));
+    const editor = h("div", { class: "editor" }, ro ? null : askBox(), h("div", { id: "checks" }, checksPanel(ro)), coverPanel(ro), s.sections.map((sec, i) => sectionPanel(sec, i, ro)), ro ? null : addBar(), attachmentsPanel(ro));
     const preview = h("div", { class: "preview" },
       h("div", { class: "bar" }, h("h2", {}, "PDF preview"), h("span", { id: "pv-state", class: "small muted" }), h("span", { class: "grow" }),
         h("button", { class: "btn ghost", onclick: () => { ws.showPreview = false; renderWorkspace(); } }, "Hide")),
@@ -2038,10 +2292,22 @@ Answer with JSON only: {"summary": "one or two sentences", "ops": [{"op": "...",
   }
 
   const pdfName = (spec) => `MSN ${spec.cover.msn || ""} Spec - ${new Date().toLocaleDateString("en-GB", { month: "short", year: "2-digit" })}.pdf`.replace(/[^\w .\-]/g, "");
-  async function downloadPdf(spec) {
+  async function downloadPdf(spec, opts) {
     spec = spec && spec.sections ? spec : ws.spec;
-    if (ws && spec === ws.spec && ws.dirty) toast("This PDF includes your unsaved edits. Save them so the fleet list matches.");
     if (!cap.downloads) return toast("Downloads aren't available in this view. Open the artifact on claude.ai to download the PDF.", true);
+    if (!opts || !opts.skipChecks) {
+      const issues = runChecks(spec).filter((i) => i.level !== "info");
+      if (issues.length) {
+        const errors = issues.filter((i) => i.level === "error").length;
+        dialog("Before you send this", h("div", {},
+          h("p", {}, errors ? `${errors} problem${errors > 1 ? "s" : ""} and ${issues.length - errors} thing${issues.length - errors === 1 ? "" : "s"} to check on this spec sheet:` : `${issues.length} thing${issues.length > 1 ? "s" : ""} to check on this spec sheet:`),
+          h("div", { class: "changes-wrap" }, h("ul", { class: "small" }, issues.slice(0, 15).map((i) => h("li", {}, i.text)))),
+          issues.length > 15 ? h("p", { class: "small muted" }, `…and ${issues.length - 15} more in Checks before sending.`) : null),
+          [{ label: "Review first" }, { label: "Download anyway", cls: "primary", run: () => { downloadPdf(spec, { skipChecks: true }); } }]);
+        return;
+      }
+    }
+    if (ws && spec === ws.spec && ws.dirty) toast("This PDF includes your unsaved edits. Save them so the fleet list matches.");
     const done = busy("Building PDF…");
     try {
       const bytes = await makePdf(spec);
@@ -2091,8 +2357,8 @@ Answer with JSON only: {"summary": "one or two sentences", "ops": [{"op": "...",
       const f = s.font || {};
       box.replaceChildren(
         h("p", { class: "small muted", style: "margin:4px 0 10px" },
-          "The ACIA website uses Canada Type Gibson. Upload the Gibson font files your licence covers (.otf, .ttf or .woff) and the PDFs and this app will use them. ",
-          "Until a Regular file is uploaded, PDFs and the app use Archivo. A missing style falls back to the closest one you uploaded."),
+          "The brand font is Archivo, the typeface on the ACIA website. It is built in: body text in Archivo Regular, headings in Archivo SemiBold at a slightly wider width, and cover names in Archivo Bold at the widest width. ",
+          "Only upload files here to replace Archivo with a different typeface; leave all four empty to keep Archivo."),
         h("div", { class: "grid2" }, FONT_SLOTS.map(([slot, label]) => h("div", { class: "field" }, h("label", {}, label),
           h("div", { class: "row", style: "flex-wrap:nowrap" },
             h("span", { class: f[slot] ? "chip ok" : "chip" }, f[slot] ? "Uploaded" : "Not set"),
@@ -2133,7 +2399,9 @@ Answer with JSON only: {"summary": "one or two sentences", "ops": [{"op": "...",
     $view.replaceChildren(h("div", { class: "fleet-head" }, h("div", { class: "grow" }, h("h1", {}, "Settings"), h("div", { class: "muted" }, "Used on every spec sheet PDF."))),
       h("div", { class: "editor" },
         h("div", { class: "panel pad" }, h("h2", { style: "margin-bottom:10px" }, "Header and footer"),
-          h("div", { class: "grid2" }, f("Company name", "company"), f("Document title", "doc_title"), f("Confidentiality line", "confidential"), f("Contacts heading on the cover", "contacts_heading"))),
+          h("div", { class: "grid2" }, f("Company name", "company"), f("Document title", "doc_title"), f("Confidentiality line", "confidential"), f("Contacts heading on the cover", "contacts_heading"),
+            (() => { const id = fid("st"); return h("div", { class: "field" }, h("label", { for: id }, "Flag data older than (days)"),
+              h("input", { class: "input", id, type: "number", min: "1", value: s.stale_days || 90, disabled: ro, oninput: (e) => (s.stale_days = Math.max(1, parseInt(e.target.value, 10) || 90)) })); })())),
         h("div", { class: "panel pad" }, h("h2", {}, "Cover contacts"), h("p", { class: "small muted" }, "The first contact sits on its own line; the rest go two per row."), box),
         h("div", { class: "panel pad" }, h("h2", { style: "margin-bottom:10px" }, "Cover disclaimer"), f("Disclaimer text", "disclaimer", true)),
         fontPanel(s, ro),

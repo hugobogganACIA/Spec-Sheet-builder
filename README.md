@@ -126,5 +126,6 @@ sends "Ask for a change" requests to Claude through the viewer's own account.
 * `artifact/src/core.js`: Excel import (same label-based rules as `app/excel_import.py`), diff, edits and the PDF layout
 * `artifact/src/app.js`: the interface, storage, preview and download
 * `artifact/src/normalize.js`: turns any workbook into one standard data shape and builds the standard layout from it. The usual template is read directly; other layouts are read by Claude, and every value is checked against the workbook cells
+* `artifact/src/checks.js`: checks before sending: Excel errors, empty or TBD fields, overdue items, derived figures recalculated from the information date, and data age
 * `artifact/src/shell.html`: styles and page markup
 * `python3 artifact/build.py` assembles `artifact/spec-sheet-builder.html`, which is what gets published

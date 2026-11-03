@@ -39,6 +39,7 @@ page = "\n".join([
     f"<script>window.SPEC_ASSETS = {json.dumps(assets)};</script>",
     f"<script>\n{(src / 'core.js').read_text()}\n</script>",
     f"<script>\n{(src / 'normalize.js').read_text()}\n</script>",
+    f"<script>\n{(src / 'checks.js').read_text()}\n</script>",
     f"<script>\n{(src / 'app.js').read_text()}\n</script>",
 ])
 out = HERE / "spec-sheet-builder.html"
