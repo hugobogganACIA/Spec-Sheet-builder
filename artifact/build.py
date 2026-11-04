@@ -1,6 +1,6 @@
-"""Assemble the single-file artifact page from src/ plus the logos and PDF fonts.
+"""Assemble the spec sheet builder page from src/ plus the logos, fonts and illustrations.
 
-    python3 artifact/build.py   ->  artifact/spec-sheet-builder.html
+    python3 artifact/build.py   ->  artifact/embed/m/specs.html  (ACIA Commercial's "Spec sheets" tab)
 """
 import base64
 import json
@@ -42,13 +42,10 @@ page = "\n".join([
     f"<script>\n{(src / 'checks.js').read_text()}\n</script>",
     f"<script>\n{(src / 'app.js').read_text()}\n</script>",
 ])
-out = HERE / "spec-sheet-builder.html"
-out.write_text(page)
-print(out, f"{len(page) / 1e6:.2f} MB")
-
-# The same page as a stand-alone document, for ACIA Commercial's framed "Spec sheets" tab (m/specs.html).
+# The builder lives in ACIA Commercial as its framed "Spec sheets" tab (published there as m/specs.html,
+# its data under m/specs/...). The separate stand-alone artifact was retired on 4 Nov 2026.
 framed = HERE / "embed" / "m" / "specs.html"
 framed.parent.mkdir(parents=True, exist_ok=True)
 framed.write_text('<!doctype html><html lang="en"><head><meta charset="utf-8">'
                   '<meta name="viewport" content="width=device-width,initial-scale=1"></head><body>' + page + "</body></html>")
-print(framed)
+print(framed, f"{len(page) / 1e6:.2f} MB")

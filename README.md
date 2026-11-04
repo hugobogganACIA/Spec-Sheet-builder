@@ -115,13 +115,15 @@ SPEC_SAMPLES=/path/to/specs pytest
 * **AI model:** defaults to `claude-opus-5-5`. Override it with
   `SPEC_AI_MODEL` if needed.
 
-## Artifact version (runs on claude.ai)
+## Spec sheets tab in ACIA Commercial (runs on claude.ai)
 
-`artifact/` holds a single-page version of the builder that runs as a claude.ai
-artifact. It needs no server. It stores spec sheets and their versions in the
-artifact's shared database and LOPA and other images in the artifact's file
-store. It builds the PDF in the browser (pdfmake, Inter font, same layout) and
-sends "Ask for a change" requests to Claude through the viewer's own account.
+The builder now lives in the ACIA Commercial artifact as its **Spec sheets** tab, after Pricing. It is a
+framed module like Credit Lab: `artifact/build.py` writes `artifact/embed/m/specs.html`, which is published
+to ACIA Commercial as `m/specs.html`. Its spec sheets, versions and settings are stored in ACIA Commercial's
+database under `m/specs/...`, and images in that artifact's file store. It needs no server. PDFs are built
+in the browser (pdfmake, Archivo, ACIA layout), and files that aren't the usual Excel template are read by
+Claude through the viewer's account, with every value checked against the source. The earlier stand-alone
+artifact was retired once its data had been copied into the tab.
 
 * `artifact/src/core.js`: Excel import (same label-based rules as `app/excel_import.py`), diff, edits and the PDF layout
 * `artifact/src/app.js`: the interface, storage, preview and download
