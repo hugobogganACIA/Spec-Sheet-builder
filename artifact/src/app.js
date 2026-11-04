@@ -81,15 +81,24 @@
 
   // ------------------------------------------------------------ page parts, in ACIA Commercial's pattern
   /** The navy cover: crumbs [text | [text, hash]], title, sub (under the title), lede, actions, side (a glance card). */
-  function coverEl({ crumbs, title, sub, badge, lede, actions, side, compact }) {
+  function coverEl({ crumbs, title, sub, badge, lede, actions, side, compact, back }) {
     const cr = (crumbs || []).flatMap((c, i) => [i ? h("span", { "aria-hidden": "true" }, "·") : null,
       Array.isArray(c) ? h("button", { class: "crumb", onclick: () => (location.hash = c[1]) }, c[0]) : h("span", {}, c)]);
+    // Back, as on the site's own detail pages: a pill with an arrow before the crumbs
+    const backBtn = back ? h("button", { class: "cv-back", "aria-label": back.label, onclick: () => (location.hash = back.hash) }, backIcon(), h("span", {}, back.label)) : null;
     return h("section", { class: "cover" + (compact ? " compact" : "") }, h("div", { class: "shell" + (side ? " cover-grid" : "") },
-      h("div", {}, cr.length ? h("p", { class: "eyebrow-line" }, cr) : null,
+      h("div", {}, backBtn || cr.length ? h("div", { class: "cv-top" }, backBtn, cr.length ? h("p", { class: "eyebrow-line" }, cr) : null) : null,
         h("h1", {}, title, badge || null, sub ? h("span", { class: "t-sub" }, sub) : null),
         lede ? h("p", { class: "lede" }, lede) : null,
         actions && actions.length ? h("div", { class: "cover-actions" }, actions) : null),
       side || null));
+  }
+  function backIcon() {
+    const NS = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(NS, "svg");
+    for (const [k, v] of Object.entries({ viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": "2.2", "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true" })) svg.setAttribute(k, v);
+    for (const d of ["M19 12H5", "m11 18-6-6 6-6"]) { const p = document.createElementNS(NS, "path"); p.setAttribute("d", d); svg.append(p); }
+    return svg;
   }
   /** A glance card for the cover's side: rows [{l, s, v, vs, tone, onClick}]. */
   function glance(title, rows, empty) {
@@ -536,6 +545,7 @@
     const discard = async () => {
       if (await confirmDialog("Discard changes?", "Your unsaved edits to this spec sheet will be dropped.", "Discard", "danger")) { ws.spec = clone(ws.saved); ws.dirty = false; ws.highlight.clear(); renderWorkspace(); schedulePreview(0); } };
     const head = coverEl({
+      back: { label: "Back to spec sheets", hash: "#fleet" },
       crumbs: [["Spec sheets", "#fleet"], `${isEng ? "ESN" : "MSN"} ${c.msn || "?"}`],
       title: `${isEng ? "ESN" : "MSN"} ${c.msn || "?"}`,
       badge: h("span", { id: "state-chip", class: ws.dirty ? "pill on-dark warn" : "pill on-dark" }, ws.dirty ? "Unsaved" : "Saved"),
@@ -983,7 +993,7 @@ Answer with JSON only: {"summary": "one or two sentences", "ops": [{"op": "...",
     s.contacts = s.contacts || []; draw();
     const saveBtn = ro ? null : h("button", { class: "btn light", onclick: async () => {
       try { await cap.db.doc("config/settings").set(s); toast("Settings saved. Every PDF uses them from now on."); } catch (e) { toast("Couldn't save settings: " + (e.message || e.code), true); } } }, "Save settings");
-    $view.replaceChildren(coverEl({ crumbs: [["Spec sheets", "#fleet"], "Settings"], title: "Settings",
+    $view.replaceChildren(coverEl({ back: { label: "Back to spec sheets", hash: "#fleet" }, crumbs: [["Spec sheets", "#fleet"], "Settings"], title: "Settings",
         lede: "The cover contacts, disclaimer, header and footer used on every spec sheet PDF, and when data counts as out of date.",
         actions: [saveBtn, h("button", { class: "btn glass", onclick: () => (location.hash = "#fleet") }, "Back to spec sheets")].filter(Boolean), compact: true }),
       h("div", { class: "shell editor", style: "padding-top:22px" },

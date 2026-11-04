@@ -110,6 +110,13 @@ main { padding-block: 0 64px; }
 .cover :focus-visible { outline-color: #FFFFFF; }
 .cover-grid { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 44px; align-items: end; }
 .eyebrow-line { font-size: .72rem; text-transform: uppercase; letter-spacing: .15em; color: var(--dk-hi); font-weight: 600; margin: 0 0 12px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.cv-top { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; margin: 0 0 12px; }
+.cv-top .eyebrow-line { margin: 0; }
+.cv-back { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 4px 13px 4px 9px; border-radius: 999px;
+  border: 1px solid rgba(230,238,255,.28); background: rgba(230,238,255,.08); color: #E6EEFF; font: 600 .76rem var(--body); cursor: pointer; }
+.cv-back svg { width: 15px; height: 15px; flex: none; }
+.cv-back:hover { background: rgba(230,238,255,.16); }
+.cv-back:focus-visible { outline: 2px solid var(--dk-hi); outline-offset: 2px; }
 .eyebrow-line .crumb { background: none; border: 0; padding: 0; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
 .cover h1 { font-family: var(--display); font-size: 2.6rem; letter-spacing: -.035em; font-weight: 800; line-height: 1.08; color: #FFFFFF; max-width: 24ch; font-variation-settings: "wdth" 100; }
 .cover h1 .t-sub { display: block; font-size: .5em; font-weight: 500; letter-spacing: 0; color: #BCD0F2; margin-top: 6px; }
