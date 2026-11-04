@@ -769,10 +769,12 @@ html[data-hub] .preview { top: 14px; height: calc(100vh - 28px); }
     if (infoDate) at(PAGE_W - 236, 50, 200, { text: `Status as of ${infoDate}`, alignment: "right", color: paleSky, fontSize: 7.5 });
 
     const isEngine = cover.kind === "engine";
-    const idLabel = isEngine ? "ESN" : "MSN";
     at(36, 112, 470, { text: isEngine ? "ENGINE MODEL" : "AIRCRAFT MODEL", color: paleSky, font: "Heading", fontSize: 8, characterSpacing: 1.6 });
-    at(36, 126, 470, { text: cover.model || "", color: white, font: "Feature", fontSize: 38, lineHeight: 1 });
-    at(36, 178, 470, { text: [{ text: idLabel + " ", color: paleSky }, { text: cover.msn || "", color: white }], font: "Heading", fontSize: 18 });
+    // The model on one line: a long name ("ATR72-500 Freighter") is set smaller rather than wrapping into the stripe.
+    // The MSN/ESN is not repeated here; it leads the facts strip below the illustration.
+    const modelText = cover.model || "";
+    const modelSize = Math.max(20, Math.min(38, 470 / Math.max(1, modelText.length * 0.8)));
+    at(36, 126 + (38 - modelSize) * 0.6, 470, { text: modelText, color: white, font: "Feature", fontSize: modelSize, lineHeight: 1 });
 
     // Illustration: sits on a ground line, centred, scaled to the type's proportions.
     // Aircraft sheets show the aircraft type; engine sheets show the engine type (larger, it is the subject).
