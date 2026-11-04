@@ -335,7 +335,7 @@
   function extractionPrompt(dump, filename, source) {
     source = source || "workbook";
     const how = source === "workbook"
-      ? `${how}`
+      ? `The workbook "${filename}" is given below as text: each line is one row ("R12:"), and each cell is "<column letter>=<value as Excel displays it>".`
       : source === "text"
         ? `The document "${filename}" is given below as text extracted from it. Table cells on one line are separated by " | ". Page breaks are marked "### Page N".`
         : `The document "${filename}" is attached as images, one per page, in order. Read every page, including tables and small print.`;
