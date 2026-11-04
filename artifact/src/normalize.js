@@ -50,6 +50,7 @@
     ["install", "INSTALLATION / LAST OVERHAUL DATE", /INSTALL|LAST OVH|LAST OVERHAUL/],
     ["cal", "CALENDAR CONSUMED", /CALENDAR/],
     ["limit_m", "OVERHAUL LIMIT (MNTHS)", /LIMIT/],
+    ["next", "NEXT OVERHAUL DATE", /NEXT/, true], // optional: printed only when a workbook gives it
     ["rem_m", "REMAINING MONTHS", /REMAINING/],
   ];
   const WEIGHTS = [
@@ -215,7 +216,8 @@
     }
 
     const G = d.landing_gears || [];
-    if (G.length) S.push(grid("LANDING GEARS", G.map((g) => g.position), GEAR.map(([k, label]) => ({ label, cells: G.map((g) => g[k] || "") }))));
+    if (G.length) S.push(grid("LANDING GEARS", G.map((g) => g.position), GEAR.filter(([k, , , optional]) => !optional || G.some((g) => g[k]))
+      .map(([k, label]) => ({ label, cells: G.map((g) => g[k] || "") }))));
     const I = d.inspections || [];
     if (I.length) S.push(grid("SCHEDULED INSPECTIONS", ["LAST ACTUAL INSP", "NEXT INSPECTION", "INTERVAL", "REMAINING", "UOM"],
       I.map((x) => ({ label: x.name, cells: [x.last || "", x.next || "", x.interval || "", x.remaining || "", x.uom || ""] }))));
@@ -238,7 +240,7 @@
     const general = Object.fromEntries(GENERAL.map(([k, label]) => [label, d.general[k] || ""]));
     const typeText = general["AIRCRAFT TYPE"];
     let model = typeText;
-    const m = typeText.match(/(\d{2})-\d+\w*\s*\((\d{3})\)/);
+    const m = typeText.match(/(\d{2})-\d+\w*\s*\(\s*-?\s*(\d{3})/); // "72-212A (600)", "ATR 72-212A (-500 series)"
     if (m) model = `ATR${m[1]}-${m[2]}`;
     const y = (general["DATE OF MANUFACTURE"] || "").match(/(\d{4})/);
     return { cover: { model, msn: general["AIRCRAFT SERIAL NUMBER"], year: y ? y[1] : "" }, sections: S, attachments: [],
@@ -310,7 +312,7 @@
     "units": [{"position": "LH PROP", "parts": [{"name": "ACTUATOR", "sn": "", "tsn": "", "tso": "", "install": "", "cal": "", "next": "", "limit_fh": "", "rem_fh": "", "limit_m": "", "rem_m": ""}]}],
     "blades": [{"position": "LH", "blades": [{"sn": "", "tsn": "", "tso": "", "install": "", "cal": "", "next": "", "limit_fh": "", "rem_fh": "", "limit_m": "", "rem_m": ""}]}]
   },
-  "landing_gears": [{"position": "LH-MLG", "sn": "", "csn": "", "cso": "", "install": "", "cal": "", "limit_m": "", "rem_m": ""}],
+  "landing_gears": [{"position": "LH-MLG", "sn": "", "csn": "", "cso": "", "install": "", "cal": "", "limit_m": "", "next": "", "rem_m": ""}],
   "inspections": [{"name": "1C CHECK", "last": "", "next": "", "interval": "", "remaining": "", "uom": ""}],
   "weights": [{"label": "MAXIMUM TAKE-OFF WEIGHT (MTOW)", "value": ""}],
   "options": [{"text": "", "bold": false}],

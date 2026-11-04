@@ -21,8 +21,11 @@ for (const f of process.argv.slice(2)) {
   const flat = (spec) => { const o = {}; let hd = ""; for (const s of spec.sections) { if (s.type === "heading") { hd = s.title; continue; }
     if (s.type === "kv") s.rows.forEach((x) => (o[`${hd}|${s.title}|${x.label}`] = x.value));
     if (s.type === "grid") s.rows.forEach((x, i) => x.cells.forEach((c, j) => (o[`${hd}|${s.title}|${i}|${j}`] = c))); } return o; };
-  const a = flat(r.spec), b = flat(std);
-  ok(Object.keys(a).every((k) => !a[k] || a[k] === b[k]), `${f.split("/").pop()}: standard layout keeps every value`);
+  // labels are standardised (case, wording), so compare the values themselves: every value read must reach the output
+  const counts = (o) => { const m = new Map(); for (const v of Object.values(o)) if (v) m.set(v, (m.get(v) || 0) + 1); return m; };
+  const a = counts(flat(r.spec)), b = counts(flat(std));
+  const lost = [...a].filter(([v, n]) => (b.get(v) || 0) < n).map(([v]) => v);
+  ok(!lost.length, `${f.split("/").pop()}: standard layout keeps every value${lost.length ? " (lost: " + lost.slice(0, 8).join(", ") + ")" : ""}`);
   ok(Array.isArray(SpecChecks.run(std, { today: Date.now() })), `${f.split("/").pop()}: checks run`);
 }
 process.exit(failed ? 1 : 0);

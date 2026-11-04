@@ -453,7 +453,7 @@ html[data-hub] .preview { top: 14px; height: calc(100vh - 28px); }
     const groups = [];
     for (const c of cols) {
       let label = "";
-      for (const [lo, hi, text] of spans) if (lo <= c && c <= hi) label = text;
+      for (const [lo, hi, text] of spans) if (lo <= c && c <= hi && !label) label = text; // first heading over a column wins (ignores stray notes)
       const last = groups[groups.length - 1];
       if (last && label && last.label === label) last.span++;
       else groups.push({ label, span: 1 });
@@ -468,7 +468,11 @@ html[data-hub] .preview { top: 14px; height: calc(100vh - 28px); }
   // ---------------------------------------------------------------- spec sheet
   function parseSpecSheet(ws, sheetName, warnings) {
     const rows = readRows(ws);
-    const bl = blocks(rows).filter((b) => b[0].r > 3);
+    // Title rows at the top ("MSN 1072 AIRCRAFT TECHNICAL SPECIFICATIONS", "ACIA AERO LEASING"): a single cell of
+    // text that isn't a label or a known heading. Drop just those rows, so data that starts right under the title is kept.
+    const isTitle = (r) => r.r <= 3 && Object.keys(r.cells).length === 1 && !/:\s*$/.test(r.text(+Object.keys(r.cells)[0])) &&
+      !KNOWN_HEADINGS.has(r.text(+Object.keys(r.cells)[0]).toUpperCase().trim());
+    const bl = blocks(rows.map((r) => (isTitle(r) ? makeRow(r.r, {}) : r)));
     const sections = [];
     const general = {};
     let heading = null, prevSpans = null, inOptions = false, unit = null;
@@ -580,7 +584,7 @@ html[data-hub] .preview { top: 14px; height: calc(100vh - 28px); }
   function coverFromGeneral(g) {
     const type = g["AIRCRAFT TYPE"] || "";
     let model = type;
-    const m = type.match(/(\d{2})-\d+\w*\s*\((\d{3})\)/);
+    const m = type.match(/(\d{2})-\d+\w*\s*\(\s*-?\s*(\d{3})/);
     if (m) model = `ATR${m[1]}-${m[2]}`;
     const y = (g["DATE OF MANUFACTURE"] || "").match(/(\d{4})/);
     return { model, msn: g["AIRCRAFT SERIAL NUMBER"] || "", year: y ? y[1] : "" };
@@ -601,8 +605,21 @@ html[data-hub] .preview { top: 14px; height: calc(100vh - 28px); }
     const XLSX = root.XLSX;
     const wb = XLSX.read(buffer, { type: "array", cellNF: true, cellDates: false });
     const warnings = [];
-    const specName = wb.SheetNames.find((n) => n.toUpperCase().includes("SPEC")) || wb.SheetNames[0];
-    const { sections, general } = parseSpecSheet(wb.Sheets[specName], specName, warnings);
+    // Several spec tabs (e.g. "Technical Specification Old" next to "Technical Specification"): read each and keep the
+    // one that fills the most general fields, preferring a tab not marked old, copy or previous.
+    const cands = wb.SheetNames.filter((n) => /SPEC/i.test(n));
+    if (!cands.length) cands.push(wb.SheetNames[0]);
+    let best = null;
+    for (const name of cands) {
+      const w = [];
+      const parsed = parseSpecSheet(wb.Sheets[name], name, w);
+      const score = Object.values(parsed.general).filter(Boolean).length * 10 - (/\b(OLD|COPY|PREV|PREVIOUS|ARCHIVE|BACKUP)\b/i.test(name) ? 5 : 0);
+      if (!best || score > best.score) best = { name, parsed, w, score };
+    }
+    const specName = best.name;
+    const { sections, general } = best.parsed;
+    warnings.push(...best.w);
+    if (cands.length > 1) warnings.unshift(`Read the "${specName}" tab; the workbook also has ${cands.filter((n) => n !== specName).map((n) => `"${n}"`).join(", ")}.`);
     const avName = wb.SheetNames.find((n) => n.toUpperCase().includes("AVIONIC"));
     if (avName) {
       const av = parseAvionics(wb.Sheets[avName], avName, warnings);
@@ -1025,6 +1042,7 @@ html[data-hub] .preview { top: 14px; height: calc(100vh - 28px); }
     ["install", "INSTALLATION / LAST OVERHAUL DATE", /INSTALL|LAST OVH|LAST OVERHAUL/],
     ["cal", "CALENDAR CONSUMED", /CALENDAR/],
     ["limit_m", "OVERHAUL LIMIT (MNTHS)", /LIMIT/],
+    ["next", "NEXT OVERHAUL DATE", /NEXT/, true], // optional: printed only when a workbook gives it
     ["rem_m", "REMAINING MONTHS", /REMAINING/],
   ];
   const WEIGHTS = [
@@ -1190,7 +1208,8 @@ html[data-hub] .preview { top: 14px; height: calc(100vh - 28px); }
     }
 
     const G = d.landing_gears || [];
-    if (G.length) S.push(grid("LANDING GEARS", G.map((g) => g.position), GEAR.map(([k, label]) => ({ label, cells: G.map((g) => g[k] || "") }))));
+    if (G.length) S.push(grid("LANDING GEARS", G.map((g) => g.position), GEAR.filter(([k, , , optional]) => !optional || G.some((g) => g[k]))
+      .map(([k, label]) => ({ label, cells: G.map((g) => g[k] || "") }))));
     const I = d.inspections || [];
     if (I.length) S.push(grid("SCHEDULED INSPECTIONS", ["LAST ACTUAL INSP", "NEXT INSPECTION", "INTERVAL", "REMAINING", "UOM"],
       I.map((x) => ({ label: x.name, cells: [x.last || "", x.next || "", x.interval || "", x.remaining || "", x.uom || ""] }))));
@@ -1213,7 +1232,7 @@ html[data-hub] .preview { top: 14px; height: calc(100vh - 28px); }
     const general = Object.fromEntries(GENERAL.map(([k, label]) => [label, d.general[k] || ""]));
     const typeText = general["AIRCRAFT TYPE"];
     let model = typeText;
-    const m = typeText.match(/(\d{2})-\d+\w*\s*\((\d{3})\)/);
+    const m = typeText.match(/(\d{2})-\d+\w*\s*\(\s*-?\s*(\d{3})/); // "72-212A (600)", "ATR 72-212A (-500 series)"
     if (m) model = `ATR${m[1]}-${m[2]}`;
     const y = (general["DATE OF MANUFACTURE"] || "").match(/(\d{4})/);
     return { cover: { model, msn: general["AIRCRAFT SERIAL NUMBER"], year: y ? y[1] : "" }, sections: S, attachments: [],
@@ -1285,7 +1304,7 @@ html[data-hub] .preview { top: 14px; height: calc(100vh - 28px); }
     "units": [{"position": "LH PROP", "parts": [{"name": "ACTUATOR", "sn": "", "tsn": "", "tso": "", "install": "", "cal": "", "next": "", "limit_fh": "", "rem_fh": "", "limit_m": "", "rem_m": ""}]}],
     "blades": [{"position": "LH", "blades": [{"sn": "", "tsn": "", "tso": "", "install": "", "cal": "", "next": "", "limit_fh": "", "rem_fh": "", "limit_m": "", "rem_m": ""}]}]
   },
-  "landing_gears": [{"position": "LH-MLG", "sn": "", "csn": "", "cso": "", "install": "", "cal": "", "limit_m": "", "rem_m": ""}],
+  "landing_gears": [{"position": "LH-MLG", "sn": "", "csn": "", "cso": "", "install": "", "cal": "", "limit_m": "", "next": "", "rem_m": ""}],
   "inspections": [{"name": "1C CHECK", "last": "", "next": "", "interval": "", "remaining": "", "uom": ""}],
   "weights": [{"label": "MAXIMUM TAKE-OFF WEIGHT (MTOW)", "value": ""}],
   "options": [{"text": "", "bold": false}],
@@ -1722,7 +1741,16 @@ ${source === "images" ? "" : `<document>\n${dump}\n</document>`}`;
     setTimeout(() => el.remove(), err ? 7000 : 3200);
     return el;
   }
-  function busy(msg) { const el = h("div", {}, h("span", { class: "spin" }), " ", msg); document.getElementById("toasts").append(el); return () => el.remove(); }
+  /** A progress message that counts the seconds, so a long read never looks like nothing is happening. */
+  function busy(msg) {
+    const t0 = Date.now(), secs = h("span", { class: "small" }, "");
+    const el = h("div", { class: "busy" }, h("span", { class: "spin" }), " ", msg, " ", secs);
+    document.getElementById("toasts").append(el);
+    const timer = setInterval(() => { const n = Math.round((Date.now() - t0) / 1000); secs.textContent = n >= 3 ? `(${n} s)` : ""; }, 1000);
+    return () => { clearInterval(timer); el.remove(); };
+  }
+  /** Reject if a platform call hasn't answered in ms milliseconds. */
+  const withTimeout = (p, ms, message) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(message)), ms))]);
 
   /** In-page dialog. actions: [{label, cls, run}] — run may return false to keep the dialog open. */
   function dialog(title, body, actions) {
@@ -2043,7 +2071,7 @@ ${source === "images" ? "" : `<document>\n${dump}\n</document>`}`;
     return extractWithClaude({ text: text.slice(0, max), cells: N.textCells(text), truncated: text.length > max, source: "text", name, limits });
   }
 
-  async function sampleLimits() { try { return cap.sample ? await cap.sample.limits() : null; } catch (_) { return null; } }
+  async function sampleLimits() { try { return cap.sample ? await withTimeout(cap.sample.limits(), 6000, "limits timed out") : null; } catch (_) { return null; } }
   const maxChars = (limits) => Math.max(20000, ((limits && limits.maxPromptBytes) || 262144) - 14000);
 
   /** Text of a PDF, one line per text row, with wide gaps shown as " | " so tables stay readable. */
@@ -2096,7 +2124,8 @@ ${source === "images" ? "" : `<document>\n${dump}\n</document>`}`;
     const opts = { modelTier: !tiers || tiers.includes("complex") ? "complex" : "default" };
     if (images) opts.images = images;
     let raw;
-    try { raw = await cap.sample.json(N.extractionPrompt(text || "", name, source), opts); }
+    try { raw = await withTimeout(cap.sample.json(N.extractionPrompt(text || "", name, source), opts), 300000,
+                                  "Claude didn't finish reading the file within 5 minutes. Try again, or upload a smaller file."); }
     catch (e) {
       if (e && e.code === "not_granted") throw new Error("Claude wasn't allowed to read the file. Allow it when asked, then upload again.");
       if (e && e.code === "rate_limited") throw new Error("Claude is busy right now. Try the upload again in a minute.");

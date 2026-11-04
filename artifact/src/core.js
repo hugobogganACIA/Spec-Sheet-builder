@@ -150,7 +150,7 @@
     const groups = [];
     for (const c of cols) {
       let label = "";
-      for (const [lo, hi, text] of spans) if (lo <= c && c <= hi) label = text;
+      for (const [lo, hi, text] of spans) if (lo <= c && c <= hi && !label) label = text; // first heading over a column wins (ignores stray notes)
       const last = groups[groups.length - 1];
       if (last && label && last.label === label) last.span++;
       else groups.push({ label, span: 1 });
@@ -165,7 +165,11 @@
   // ---------------------------------------------------------------- spec sheet
   function parseSpecSheet(ws, sheetName, warnings) {
     const rows = readRows(ws);
-    const bl = blocks(rows).filter((b) => b[0].r > 3);
+    // Title rows at the top ("MSN 1072 AIRCRAFT TECHNICAL SPECIFICATIONS", "ACIA AERO LEASING"): a single cell of
+    // text that isn't a label or a known heading. Drop just those rows, so data that starts right under the title is kept.
+    const isTitle = (r) => r.r <= 3 && Object.keys(r.cells).length === 1 && !/:\s*$/.test(r.text(+Object.keys(r.cells)[0])) &&
+      !KNOWN_HEADINGS.has(r.text(+Object.keys(r.cells)[0]).toUpperCase().trim());
+    const bl = blocks(rows.map((r) => (isTitle(r) ? makeRow(r.r, {}) : r)));
     const sections = [];
     const general = {};
     let heading = null, prevSpans = null, inOptions = false, unit = null;
@@ -277,7 +281,7 @@
   function coverFromGeneral(g) {
     const type = g["AIRCRAFT TYPE"] || "";
     let model = type;
-    const m = type.match(/(\d{2})-\d+\w*\s*\((\d{3})\)/);
+    const m = type.match(/(\d{2})-\d+\w*\s*\(\s*-?\s*(\d{3})/);
     if (m) model = `ATR${m[1]}-${m[2]}`;
     const y = (g["DATE OF MANUFACTURE"] || "").match(/(\d{4})/);
     return { model, msn: g["AIRCRAFT SERIAL NUMBER"] || "", year: y ? y[1] : "" };
@@ -298,8 +302,21 @@
     const XLSX = root.XLSX;
     const wb = XLSX.read(buffer, { type: "array", cellNF: true, cellDates: false });
     const warnings = [];
-    const specName = wb.SheetNames.find((n) => n.toUpperCase().includes("SPEC")) || wb.SheetNames[0];
-    const { sections, general } = parseSpecSheet(wb.Sheets[specName], specName, warnings);
+    // Several spec tabs (e.g. "Technical Specification Old" next to "Technical Specification"): read each and keep the
+    // one that fills the most general fields, preferring a tab not marked old, copy or previous.
+    const cands = wb.SheetNames.filter((n) => /SPEC/i.test(n));
+    if (!cands.length) cands.push(wb.SheetNames[0]);
+    let best = null;
+    for (const name of cands) {
+      const w = [];
+      const parsed = parseSpecSheet(wb.Sheets[name], name, w);
+      const score = Object.values(parsed.general).filter(Boolean).length * 10 - (/\b(OLD|COPY|PREV|PREVIOUS|ARCHIVE|BACKUP)\b/i.test(name) ? 5 : 0);
+      if (!best || score > best.score) best = { name, parsed, w, score };
+    }
+    const specName = best.name;
+    const { sections, general } = best.parsed;
+    warnings.push(...best.w);
+    if (cands.length > 1) warnings.unshift(`Read the "${specName}" tab; the workbook also has ${cands.filter((n) => n !== specName).map((n) => `"${n}"`).join(", ")}.`);
     const avName = wb.SheetNames.find((n) => n.toUpperCase().includes("AVIONIC"));
     if (avName) {
       const av = parseAvionics(wb.Sheets[avName], avName, warnings);

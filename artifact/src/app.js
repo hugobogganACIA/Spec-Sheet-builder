@@ -32,7 +32,16 @@
     setTimeout(() => el.remove(), err ? 7000 : 3200);
     return el;
   }
-  function busy(msg) { const el = h("div", {}, h("span", { class: "spin" }), " ", msg); document.getElementById("toasts").append(el); return () => el.remove(); }
+  /** A progress message that counts the seconds, so a long read never looks like nothing is happening. */
+  function busy(msg) {
+    const t0 = Date.now(), secs = h("span", { class: "small" }, "");
+    const el = h("div", { class: "busy" }, h("span", { class: "spin" }), " ", msg, " ", secs);
+    document.getElementById("toasts").append(el);
+    const timer = setInterval(() => { const n = Math.round((Date.now() - t0) / 1000); secs.textContent = n >= 3 ? `(${n} s)` : ""; }, 1000);
+    return () => { clearInterval(timer); el.remove(); };
+  }
+  /** Reject if a platform call hasn't answered in ms milliseconds. */
+  const withTimeout = (p, ms, message) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(message)), ms))]);
 
   /** In-page dialog. actions: [{label, cls, run}] — run may return false to keep the dialog open. */
   function dialog(title, body, actions) {
@@ -353,7 +362,7 @@
     return extractWithClaude({ text: text.slice(0, max), cells: N.textCells(text), truncated: text.length > max, source: "text", name, limits });
   }
 
-  async function sampleLimits() { try { return cap.sample ? await cap.sample.limits() : null; } catch (_) { return null; } }
+  async function sampleLimits() { try { return cap.sample ? await withTimeout(cap.sample.limits(), 6000, "limits timed out") : null; } catch (_) { return null; } }
   const maxChars = (limits) => Math.max(20000, ((limits && limits.maxPromptBytes) || 262144) - 14000);
 
   /** Text of a PDF, one line per text row, with wide gaps shown as " | " so tables stay readable. */
@@ -406,7 +415,8 @@
     const opts = { modelTier: !tiers || tiers.includes("complex") ? "complex" : "default" };
     if (images) opts.images = images;
     let raw;
-    try { raw = await cap.sample.json(N.extractionPrompt(text || "", name, source), opts); }
+    try { raw = await withTimeout(cap.sample.json(N.extractionPrompt(text || "", name, source), opts), 300000,
+                                  "Claude didn't finish reading the file within 5 minutes. Try again, or upload a smaller file."); }
     catch (e) {
       if (e && e.code === "not_granted") throw new Error("Claude wasn't allowed to read the file. Allow it when asked, then upload again.");
       if (e && e.code === "rate_limited") throw new Error("Claude is busy right now. Try the upload again in a minute.");
