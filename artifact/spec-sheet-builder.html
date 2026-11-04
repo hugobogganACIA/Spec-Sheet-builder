@@ -888,12 +888,28 @@ html[data-hub] .preview { top: 14px; height: calc(100vh - 28px); }
         body.push([{ text: r.label, bold: !av, alignment: av ? "center" : "left" },
                    ...cells.map((c) => ({ text: c, alignment: av ? "left" : "center" }))]);
       }
-      const labelW = av ? 26 : n >= 5 ? 128 : 150;
+      // Fit the table to the page: a value that can't wrap (a serial like FR201604024RT) needs its whole width.
+      // Estimate each column's widest unbreakable word; if the columns don't fit, narrow the label column, then
+      // set the table's text smaller, just enough to fit.
+      let fontSize = (av ? 6.5 : n >= 5 ? 7 : 7.4) - 0.45 * k;
+      const padX = n >= 5 ? 2.6 : 4;
+      let labelW = av ? 26 : n >= 5 ? 128 : 150;
       const widths = [labelW, ...s.columns.map(() => "*")];
       if (av && n === 6) widths.splice(1, 6, "*", 62, 56, "*", 46, 32);
+      else {
+        const AVAIL = PAGE_W - 64, CHAR = 0.66; // usable width (pt); average character width as a share of font size, digits and capitals
+        const longest = (t) => String(t || "").split(/\s+/).reduce((m, w) => Math.max(m, w.length), 0);
+        const colChars = s.columns.map((c, j) => Math.max(longest(c), ...s.rows.map((r) => longest(r.cells[j]))));
+        // the value columns share the width equally ("*"), so each must fit the widest of them
+        const widest = Math.max(1, ...colChars), cols = colChars.length;
+        const need = (fs) => cols * (widest * fs * CHAR + 2 * padX);
+        if (labelW + need(fontSize) > AVAIL) labelW = Math.max(90, AVAIL - need(fontSize));
+        if (labelW + need(fontSize) > AVAIL) fontSize = Math.max(5, ((AVAIL - labelW) / cols - 2 * padX) / (widest * CHAR));
+        widths[0] = labelW;
+      }
       const table = {
         table: { headerRows, widths, body, dontBreakRows: true },
-        fontSize: (av ? 6.5 : n >= 5 ? 7 : 7.4) - 0.45 * k,
+        fontSize,
         layout: {
           hLineWidth: (i) => (i === headerRows ? 0.9 : headerRows === 2 && i === 1 ? 0.5 : 0),
           hLineColor: (i) => (i === headerRows ? NAVY : RULE),
